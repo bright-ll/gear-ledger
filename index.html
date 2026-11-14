@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>我的物品 · 日均成本台账</title>
-<link rel="stylesheet" href="styles.css?v=5">
+<link rel="stylesheet" href="styles.css?v=6">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -40,11 +40,11 @@
       <div class="hero-stats">
         <div class="hs">
           <div class="hs-v" id="sum-total">0.00</div>
-          <div class="hs-k">资产总计(¥)</div>
+          <div class="hs-k">资产总计(<span data-cur>¥</span>)</div>
         </div>
         <div class="hs">
           <div class="hs-v" id="sum-daily">0.00</div>
-          <div class="hs-k">总日均(¥)</div>
+          <div class="hs-k">总日均(<span data-cur>¥</span>)</div>
         </div>
         <div class="hs">
           <div class="hs-v" id="sum-count">0</div>
@@ -82,8 +82,9 @@
 
     <div class="empty hidden" id="asset-empty">
       <div class="empty-ico">📦</div>
-      <p>还没有记录</p>
-      <span>点下面的「新增」，把第一件东西记下来</span>
+      <p id="asset-empty-title">还没有记录</p>
+      <span id="asset-empty-sub">点下面的「新增」，把第一件东西记下来</span>
+      <button class="empty-reset hidden" id="asset-empty-reset">看全部物品</button>
     </div>
 
     <div class="dock">
@@ -140,6 +141,16 @@
     <div id="stats-body" class="list"></div>
   </section>
 
+  <!-- ================= 我的 ================= -->
+  <section class="view hidden" id="view-mine">
+    <header class="pagehead">
+      <div class="kicker">MY SPACE</div>
+      <h1>我的</h1>
+      <p class="sub">分类、备份、外观和分享图都在这儿。</p>
+    </header>
+    <div id="mine-body" class="mine-body"></div>
+  </section>
+
   <!-- ================= 底部导航 ================= -->
   <nav class="tabbar">
     <button class="tab on" data-tab="assets">
@@ -153,6 +164,10 @@
     <button class="tab" data-tab="stats">
       <svg viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>
       <span>分析</span>
+    </button>
+    <button class="tab" data-tab="mine">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.7 3.1-5.8 7-5.8s7 2.1 7 5.8"/></svg>
+      <span>我的</span>
     </button>
   </nav>
 </div>
@@ -311,6 +326,58 @@
   </div>
 </div>
 
+<!-- ================= 分类管理 ================= -->
+<div class="sheet" id="cats-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>分类管理</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll">
+      <div class="cats-add">
+        <input id="cat-new" placeholder="输入新分类名称" maxlength="8" autocomplete="off">
+        <button class="btn-main small" id="cat-add">添加</button>
+      </div>
+      <div class="cats-list" id="cats-list"></div>
+      <p class="cats-tip">删除分类时，这个分类下的物品会自动移到「其他」。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 生成装备图片 ================= -->
+<div class="sheet" id="poster-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>生成装备图片</strong>
+      <button class="text-btn" id="poster-save">保存</button>
+    </div>
+    <div class="sheet-scroll poster-scroll">
+      <div class="poster-stage"><canvas id="poster-canvas" width="750" height="1000"></canvas></div>
+      <div class="poster-form">
+        <label class="poster-row"><span>装备</span><select id="poster-gear"></select></label>
+        <label class="poster-row"><span>海报标题</span><input id="poster-title" value="我的装备库" maxlength="16" placeholder="我的装备库"></label>
+        <label class="poster-row"><span>样式</span>
+          <select id="poster-style">
+            <option value="card">卡片</option>
+            <option value="minimal">极简</option>
+          </select>
+        </label>
+        <div class="poster-row col"><span>背景</span><div class="poster-bgs" id="poster-bgs"></div></div>
+        <div class="poster-row col"><span>展示内容</span>
+          <div class="poster-checks" id="poster-checks">
+            <label><input type="checkbox" value="brand" checked> 品牌</label>
+            <label><input type="checkbox" value="price" checked> 参考价</label>
+            <label><input type="checkbox" value="tags" checked> 标签</label>
+            <label><input type="checkbox" value="specs"> 参数</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= 登录 ================= -->
 <div class="sheet" id="login-sheet">
   <div class="sheet-panel sheet-auto">
@@ -331,9 +398,9 @@
 <!-- ================= 通用图标选择 ================= -->
 <div class="toast" id="toast"></div>
 
-<script src="config.js?v=5"></script>
-<script src="cloud.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="config.js?v=6"></script>
+<script src="cloud.js?v=6"></script>
+<script src="app.js?v=6"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {

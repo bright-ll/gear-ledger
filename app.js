@@ -8,7 +8,18 @@
   /* ---------- 常量 ---------- */
   var LS = 'gearLedger.v2';
   var DEMO_TIP_KEY = 'gearLedger.v2.demoTipClosed';
-  var CATS = ['户外', '数码', '家电', '生活用品', '家具', '其他'];
+  var LS_CATS = 'gearLedger.cats';
+  var LS_CUR = 'gearLedger.cur';
+  var LS_THEME = 'gearLedger.theme';
+  var DEFAULT_CATS = ['户外', '数码', '家电', '生活用品', '家具', '其他'];
+  var CATS = loadCats();
+  var CURS = ['¥', '$', '€', '£', '₩'];
+  var CUR = (function () {
+    try {
+      var v = localStorage.getItem(LS_CUR);
+      return CURS.indexOf(v) >= 0 ? v : '¥';
+    } catch (e) { return '¥'; }
+  })();
   var STATES = ['全部', '服役中', '已超期', '已退役', '预备役'];
   var PRICE_RANGES = [
     { k: '全部', label: '全部' },
@@ -26,6 +37,20 @@
   /* ---------- 工具 ---------- */
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+  function loadCats() {
+    try {
+      var raw = localStorage.getItem('gearLedger.cats');
+      if (!raw) return DEFAULT_CATS.slice();
+      var a = JSON.parse(raw);
+      if (!Array.isArray(a)) return DEFAULT_CATS.slice();
+      a = a.filter(function (c) { return typeof c === 'string' && c.trim(); });
+      return a.length ? a : DEFAULT_CATS.slice();
+    } catch (e) { return DEFAULT_CATS.slice(); }
+  }
+  function saveCats() {
+    try { localStorage.setItem(LS_CATS, JSON.stringify(CATS)); } catch (e) {}
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -349,11 +374,96 @@
     }).join('');
   }
 
+  /* ---------- 横滑筛选条：保持选中项可见 + 右缘提示 ---------- */
+  function updateChipsEdge(box) {
+    if (!box || !box.clientWidth) return;
+    box.classList.toggle('at-end', box.scrollLeft + box.clientWidth >= box.scrollWidth - 2);
+  }
+
+  function syncChips(box) {
+    if (!box || !box.clientWidth) return;
+    var on = box.querySelector('.chip.on');
+    if (on) {
+      var b = box.getBoundingClientRect();
+      var r = on.getBoundingClientRect();
+      var padL = 2, padR = 10; /* 右侧留出渐隐宽度，避免选中项糊在边上 */
+      if (r.left < b.left + padL) {
+        box.scrollLeft = Math.max(0, box.scrollLeft - (b.left + padL - r.left));
+      } else if (r.right > b.right - padR) {
+        box.scrollLeft = box.scrollLeft + (r.right - b.right + padR);
+      }
+    }
+    updateChipsEdge(box);
+  }
+
+  function renderChips(box, html) {
+    if (!box) return;
+    var keep = box.scrollLeft;   /* 重绘后回到原位置，不要跳回开头 */
+    box.innerHTML = html;
+    box.scrollLeft = keep;
+    syncChips(box);
+  }
+
+  /* 桌面端：鼠标按住拖动也能横滑（触屏继续走系统原生滑动） */
+  function bindChipsDrag(box) {
+    if (!box) return;
+    var down = false, moved = false, startX = 0, startLeft = 0;
+
+    box.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      down = true; moved = false;
+      startX = e.clientX; startLeft = box.scrollLeft;
+      try { box.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    box.addEventListener('pointermove', function (e) {
+      if (!down) return;
+      var dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) < 8) return;
+      moved = true;
+      box.classList.add('dragging');
+      box.scrollLeft = startLeft - dx;
+    });
+
+    function endDrag(e) {
+      if (!down) return;
+      down = false;
+      box.classList.remove('dragging');
+      try { box.releasePointerCapture(e.pointerId); } catch (err) {}
+    }
+    box.addEventListener('pointerup', endDrag);
+    box.addEventListener('pointercancel', endDrag);
+
+    /* 鼠标滚轮：在筛选条上直接横向滚（滑到头再把滚动交还页面） */
+    box.addEventListener('wheel', function (e) {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;      /* 触控板横向交给系统 */
+      if (box.scrollWidth <= box.clientWidth + 1) return;       /* 没溢出就不拦 */
+      var atStart = box.scrollLeft <= 0 && e.deltaY < 0;
+      var atEnd = box.scrollLeft + box.clientWidth >= box.scrollWidth - 1 && e.deltaY > 0;
+      if (atStart || atEnd) return;
+      box.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
+
+    /* 拖动结束后吞掉这一次误触的 click，避免选错分类 */
+    box.addEventListener('click', function (e) {
+      if (moved) {
+        e.preventDefault();
+        e.stopPropagation();
+        moved = false;
+      }
+    }, true);
+  }
+
   function renderCatChips() {
     var all = ['全部分类'].concat(CATS);
-    $('#cat-chips').innerHTML = all.map(function (c) {
-      return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-cat="' + c + '">' + c + '</button>';
-    }).join('');
+    /* 历史数据 / 导入备份里可能有不在列表中的分类，也一并给入口 */
+    DB.items.forEach(function (it) {
+      if (!it.deleted && it.cat && all.indexOf(it.cat) < 0) all.push(it.cat);
+    });
+    renderChips($('#cat-chips'), all.map(function (c) {
+      return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-cat="' + esc(c) + '">' + esc(c) + '</button>';
+    }).join(''));
   }
 
   function renderDemoTip() {
@@ -376,8 +486,8 @@
         '</div>' +
         '<div class="a-line2">' +
           ((Number(it.qty) || 1) > 1 ? '<span class="a-qty">×' + it.qty + '</span>' : '') +
-          '<span class="a-price">¥' + money(c.net) + '</span>' +
-          '<span class="a-daily">¥' + money(c.daily) + '<small>/天</small></span>' +
+          '<span class="a-price">' + CUR +  money(c.net) + '</span>' +
+          '<span class="a-daily">' + CUR +  money(c.daily) + '<small>/天</small></span>' +
         '</div>' + sub +
       '</div>' +
     '</article>';
@@ -389,9 +499,9 @@
       '<div class="acard-top" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
       '<div class="acard-body">' +
         '<div class="acard-name">' + esc(it.name) + badge + '</div>' +
-        '<div class="acard-money"><b>¥' + money(c.net) + '</b>' +
+        '<div class="acard-money"><b>' + CUR +  money(c.net) + '</b>' +
           (q > 1 ? '<span>×' + q + '</span>' : '') +
-          '<span>¥' + money(c.daily) + '/天</span></div>' +
+          '<span>' + CUR +  money(c.daily) + '/天</span></div>' +
         '<div class="acard-days' + (c.overdue ? ' over' : '') + '">' + c.days + ' 天</div>' +
       '</div>' +
     '</article>';
@@ -402,8 +512,8 @@
     return '<div class="aitem" data-id="' + it.id + '">' +
       '<span class="at-name">' + esc(it.name) + badge + '</span>' +
       '<span class="at-days' + (c.overdue ? ' over' : '') + '">' + c.days + '天</span>' +
-      '<span class="at-price">' + (q > 1 ? '×' + q + ' · ' : '') + '¥' + money(c.net) + '</span>' +
-      '<span class="at-daily">¥' + money(c.daily) + '/天</span>' +
+      '<span class="at-price">' + (q > 1 ? '×' + q + ' · ' : '') +  CUR +  money(c.net) + '</span>' +
+      '<span class="at-daily">' + CUR +  money(c.daily) + '/天</span>' +
     '</div>';
   }
 
@@ -432,7 +542,7 @@
 
       var sub = '';
       if (it.trackPerUse) {
-        sub = '<div class="a-sub">次均 ' + (c.perUse == null ? '无' : '¥' + money(c.perUse)) +
+        sub = '<div class="a-sub">次均 ' + (c.perUse == null ? '无' : '' + CUR +  money(c.perUse)) +
               ' · 已用 ' + c.used + ' 次</div>';
       }
 
@@ -446,6 +556,12 @@
       vbtns[i].classList.toggle('on', vbtns[i].getAttribute('data-aview') === view);
     }
 
+    var isFiltered = state.cat !== '全部分类' || state.status !== '全部' || !!state.q.trim();
+    $('#asset-empty-title').textContent = isFiltered ? '这个筛选下没有物品' : '还没有记录';
+    $('#asset-empty-sub').textContent = isFiltered
+      ? '换个分类或状态，也可以点下面回到全部'
+      : '点下面的「新增」，把第一件东西记下来';
+    $('#asset-empty-reset').classList.toggle('hidden', !isFiltered);
     $('#asset-empty').classList.toggle('hidden', list.length > 0);
     $('#sum-total').textContent = money(sumTotal);
     $('#sum-daily').textContent = money(sumDaily);
@@ -466,12 +582,12 @@
     var cells = [
       ['物品名称', esc(it.name), ''],
       ['购买时间', fmtDate(it.purchaseDate), ''],
-      ['价格', '¥' + money2(it.price), 'mono'],
+      ['价格', '' + CUR +  money2(it.price), 'mono'],
       ['数量', String(it.qty || 1), 'mono'],
-      ['总价(价格×数量+附加)', '¥' + money(c.total), 'mono'],
+      ['总价(价格×数量+附加)', '' + CUR +  money(c.total), 'mono'],
       ['预计用多久', it.lifeValue ? it.lifeValue + ' ' + it.lifeUnit : '无', ''],
-      ['日均费用', '¥' + money(c.daily) + '/天', 'mono blue'],
-      ['次均费用', c.perUse == null ? '无' : '¥' + money(c.perUse), 'mono'],
+      ['日均费用', '' + CUR +  money(c.daily) + '/天', 'mono blue'],
+      ['次均费用', c.perUse == null ? '无' : '' + CUR +  money(c.perUse), 'mono'],
       ['持有天数', c.days + ' 天', 'mono'],
       ['退役时间', c.expireAt ? fmtDate(c.expireAt) : '无', ''],
       ['使用状态', st, c.overdue ? 'red' : ''],
@@ -486,7 +602,7 @@
 
     var cells2 = [
       ['是否减去二手价值', it.subtractResale ? '是' : '否'],
-      ['二手价值', it.resale ? '¥' + money2(it.resale) : '未填写'],
+      ['二手价值', it.resale ? '' + CUR +  money2(it.resale) : '未填写'],
       ['是否计算单次使用金额', it.trackPerUse ? '是' : '否'],
       ['使用频率', c.used ? c.used + ' 次' : '无']
     ];
@@ -562,7 +678,12 @@
     f.elements.lifeValue.value = d.lifeValue || '';
     f.elements.lifeUnit.value = d.lifeUnit || '年';
     f.elements.hasExpiry.checked = !!d.hasExpiry;
-    f.elements.cat.value = d.cat || '户外';
+    var cats = CATS.slice();
+    if (d.cat && cats.indexOf(d.cat) < 0) cats.push(d.cat);
+    f.elements.cat.innerHTML = cats.map(function (c) {
+      return '<option>' + esc(c) + '</option>';
+    }).join('');
+    f.elements.cat.value = d.cat || cats[0];
     f.elements.status.value = d.status || '服役中';
     f.elements.subtractResale.checked = !!d.subtractResale;
     f.elements.resale.value = d.resale || '';
@@ -693,8 +814,8 @@
         (g.brand ? '<div class="card-brand">' + esc(g.brand) + '</div>' : '') +
         '<h3 class="card-name" data-open="' + g.id + '">' + esc(g.name) + '</h3>' +
         '<div class="card-badges">' + (g.tags || []).slice(0, 3).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' +
-        '<div class="card-foot"><span class="price">¥' + money2(g.refPrice) + '</span>' +
-          (own ? '<span class="own-tag">' + (oc.perUse == null ? oc.days + '天' : '¥' + money(oc.perUse) + '/次') + '</span>'
+        '<div class="card-foot"><span class="price">' + CUR +  money2(g.refPrice) + '</span>' +
+          (own ? '<span class="own-tag">' + (oc.perUse == null ? oc.days + '天' : '' + CUR +  money(oc.perUse) + '/次') + '</span>'
                : (w ? '<span class="card-w">' + w + '</span>' : '')) +
         '</div>' +
         '<button class="card-add' + (own ? ' done' : '') + '" data-gadd="' + g.id + '">' +
@@ -709,7 +830,7 @@
       '<span class="gt-name">' + esc(g.name) + '</span>' +
       '<span class="gt-w">' + w + '</span>' +
       '<span class="gt-sub">' + esc(gearMeta(g)) + '</span>' +
-      '<span class="gt-p">¥' + money2(g.refPrice) + '</span>' +
+      '<span class="gt-p">' + CUR +  money2(g.refPrice) + '</span>' +
     '</div>';
   }
 
@@ -718,7 +839,7 @@
     return '<div class="g-list" data-open="' + g.id + '">' +
       '<span class="gl-ico" style="background:' + iconBg(g.cat) + '">' + esc(g.icon || '📦') + '</span>' +
       '<span class="gl-main"><b>' + esc(g.name) + '</b><small>' + esc(gearMeta(g)) + '</small></span>' +
-      '<span class="gl-side"><b>¥' + money2(g.refPrice) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
+      '<span class="gl-side"><b>' + CUR +  money2(g.refPrice) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
     '</div>';
   }
 
@@ -727,9 +848,9 @@
     DB.gear.forEach(function (g) {
       if (!g.deleted && g.cat && cats.indexOf(g.cat) < 0) cats.push(g.cat);
     });
-    $('#gear-chips').innerHTML = cats.map(function (c) {
+    renderChips($('#gear-chips'), cats.map(function (c) {
       return '<button class="chip ' + (state.gearCat === c ? 'on' : '') + '" data-gcat="' + c + '">' + c + '</button>';
-    }).join('');
+    }).join(''));
 
     var list = filteredGear();
     var view = state.gearView;
@@ -759,7 +880,7 @@
         var w = gearWeight(g);
         if (w) { wsum += w; hasW = true; }
       });
-      var sumTxt = items.length + '件' + (hasW ? ' · ' + fmtWeight(wsum) : '') + ' · ¥' + money2(sum);
+      var sumTxt = items.length + '件' + (hasW ? ' · ' + fmtWeight(wsum) : '') + ' · ' + CUR +  money2(sum);
       return '<section class="gear-group' + (state.gearCollapsed[k] ? ' col' : '') + '">' +
         '<button class="gg-head" data-gcol="' + esc(k) + '">' +
           '<span class="gg-ico">' + catIcon(k) + '</span>' +
@@ -830,7 +951,7 @@
     var html =
       '<div class="fgroup"><h4>品牌</h4><div class="fchips">' + chips('data-gfbrand', state.gearBrand, brands) + '</div></div>' +
       '<div class="fgroup"><h4>装备类型</h4><div class="fchips">' + chips('data-gftype', state.gearType, types) + '</div></div>' +
-      '<div class="fgroup"><h4>参考价（¥）</h4><div class="fchips">' +
+      '<div class="fgroup"><h4>参考价（' + CUR + '）</h4><div class="fchips">' +
         PRICE_RANGES.map(function (p) {
           return '<button class="chip ' + (state.gearPrice === p.k ? 'on' : '') + '" data-gfprice="' + p.k + '">' + p.label + '</button>';
         }).join('') +
@@ -871,9 +992,9 @@
     if (own && oc) {
       ownBlock = '<div class="g-block"><h3>我的使用情况</h3>' +
         '<div class="kv"><span>持有天数</span><b>' + oc.days + ' 天</b></div>' +
-        '<div class="kv"><span>计入成本</span><b>¥' + money(oc.net) + '</b></div>' +
-        '<div class="kv"><span>日均</span><b>¥' + money(oc.daily) + ' / 天</b></div>' +
-        '<div class="kv"><span>次均</span><b>' + (oc.perUse == null ? '开启后可算' : '¥' + money(oc.perUse)) + '</b></div>' +
+        '<div class="kv"><span>计入成本</span><b>' + CUR +  money(oc.net) + '</b></div>' +
+        '<div class="kv"><span>日均</span><b>' + CUR +  money(oc.daily) + ' / 天</b></div>' +
+        '<div class="kv"><span>次均</span><b>' + (oc.perUse == null ? '开启后可算' : '' + CUR +  money(oc.perUse)) + '</b></div>' +
       '</div>';
     }
 
@@ -888,7 +1009,7 @@
       '<div class="g-hero">' +
         (gcat ? '<div class="g-cat">' + esc(gcat) + '</div>' : '') +
         '<h2 class="g-name">' + esc(g.name) + '</h2>' +
-        '<div class="g-price">¥' + money2(g.refPrice) + '<small>参考价</small></div>' +
+        '<div class="g-price">' + CUR +  money2(g.refPrice) + '<small>参考价</small></div>' +
         tagBlock +
       '</div>' +
       specBlock + perfBlock +
@@ -1032,7 +1153,7 @@
     var maxCat = catRows.length ? byCat[catRows[0]] : 1;
     var bars = catRows.map(function (c) {
       var pct = Math.round(byCat[c] / maxCat * 100);
-      return '<div><div class="bar-top"><b>' + esc(c) + '</b><span>¥' + money(byCat[c]) + '</span></div>' +
+      return '<div><div class="bar-top"><b>' + esc(c) + '</b><span>' + CUR +  money(byCat[c]) + '</span></div>' +
              '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>';
     }).join('');
 
@@ -1041,7 +1162,7 @@
     var maxPU = top.length ? top[0].c.perUse : 1;
     var topBars = top.map(function (x) {
       var pct = Math.round(x.c.perUse / maxPU * 100);
-      return '<div><div class="bar-top"><b>' + esc(x.it.name) + '</b><span>¥' + money(x.c.perUse) + '/次</span></div>' +
+      return '<div><div class="bar-top"><b>' + esc(x.it.name) + '</b><span>' + CUR +  money(x.c.perUse) + '/次</span></div>' +
              '<div class="bar-track"><div class="bar-fill warn" style="width:' + pct + '%"></div></div></div>';
     }).join('') || '<div style="font-size:13px;color:#a0a5b3">还没有开启「计算单次使用」的物品</div>';
 
@@ -1051,15 +1172,466 @@
 
     $('#stats-body').innerHTML =
       '<div class="panel"><h3>总览</h3><p class="sub">按当前全部物品计算</p>' +
-        '<div class="kv"><span>资产总计</span><b>¥' + money(total) + '</b></div>' +
-        '<div class="kv"><span>总日均</span><b>¥' + money(daily) + '/天</b></div>' +
+        '<div class="kv"><span>资产总计</span><b>' + CUR +  money(total) + '</b></div>' +
+        '<div class="kv"><span>总日均</span><b>' + CUR +  money(daily) + '/天</b></div>' +
         '<div class="kv"><span>物品数量</span><b>' + count + ' 件</b></div>' +
-        '<div class="kv"><span>整体次均成本</span><b>' + (avgPerUse == null ? '无' : '¥' + money(avgPerUse)) + '</b></div>' +
+        '<div class="kv"><span>整体次均成本</span><b>' + (avgPerUse == null ? '无' : '' + CUR +  money(avgPerUse)) + '</b></div>' +
       '</div>' +
       '<div class="panel"><h3>分类占比</h3><p class="sub">按金额（已扣二手价值）</p><div class="bars">' + bars + '</div></div>' +
       '<div class="panel"><h3>单次成本 TOP 5</h3><p class="sub">越高说明越贵、用得越少</p><div class="bars">' + topBars + '</div></div>' +
       '<div class="panel"><h3>超期提醒</h3><p class="sub">超过计划使用年限</p>' + overdueList + '</div>' +
       '<div style="height:8px"></div>';
+  }
+
+  /* =========================================================
+     我的：外观 / 货币 / 分类 / 备份 / 分享图
+     ========================================================= */
+  function getTheme() {
+    try { return localStorage.getItem(LS_THEME) || 'auto'; } catch (e) { return 'auto'; }
+  }
+  function applyTheme() {
+    var t = getTheme();
+    var dark = t === 'dark' || (t === 'auto' && window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', dark ? '#101218' : '#f5f6fa');
+  }
+  function setTheme(v) {
+    try { localStorage.setItem(LS_THEME, v); } catch (e) {}
+    applyTheme();
+    renderMine();
+  }
+  function applyCur() {
+    $$('[data-cur]').forEach(function (n) { n.textContent = CUR; });
+  }
+  function setCur(v) {
+    if (CURS.indexOf(v) < 0) return;
+    CUR = v;
+    try { localStorage.setItem(LS_CUR, v); } catch (e) {}
+    applyCur();
+    renderAssets(); renderGear(); renderStats(); renderMine();
+  }
+
+  function mineRow(icon, title, sub, attrs, tail) {
+    return '<button class="mine-row" ' + (attrs || '') + '>' +
+      '<span class="mine-ico">' + icon + '</span>' +
+      '<span class="mine-main"><b>' + title + '</b><small>' + sub + '</small></span>' +
+      (tail || '<span class="mine-chev">›</span>') +
+    '</button>';
+  }
+
+  function renderMine() {
+    var body = $('#mine-body');
+    if (!body) return;
+
+    var curOpts = [
+      { v: '¥', t: '¥ 人民币' }, { v: '$', t: '$ 美元' }, { v: '€', t: '€ 欧元' },
+      { v: '£', t: '£ 英镑' }, { v: '₩', t: '₩ 韩元' }
+    ].map(function (o) {
+      return '<option value="' + o.v + '"' + (o.v === CUR ? ' selected' : '') + '>' + o.t + '</option>';
+    }).join('');
+
+    var th = getTheme();
+    var thOpts = [
+      { v: 'auto', t: '跟随系统' }, { v: 'light', t: '浅色' }, { v: 'dark', t: '深色' }
+    ].map(function (o) {
+      return '<option value="' + o.v + '"' + (o.v === th ? ' selected' : '') + '>' + o.t + '</option>';
+    }).join('');
+
+    body.innerHTML =
+      '<div class="mine-card">' +
+        mineRow('📁', '分类管理', '自定义物品分类，可以增删改', 'id="mine-cats"',
+          '<span class="mine-val">' + CATS.length + ' 个</span><span class="mine-chev">›</span>') +
+      '</div>' +
+      '<div class="mine-title">数据导出</div>' +
+      '<div class="mine-card">' +
+        mineRow('📄', '导出 CSV', 'Excel / WPS 可以直接打开', 'data-mine="csv"') +
+        mineRow('🗂', '导出备份', '完整数据，换设备能恢复', 'data-mine="backup"') +
+      '</div>' +
+      '<div class="mine-title">通用设置</div>' +
+      '<div class="mine-card">' +
+        '<div class="mine-row"><span class="mine-ico">💱</span>' +
+          '<span class="mine-main"><b>货币单位</b><small>所有金额按这个符号显示</small></span>' +
+          '<select class="mine-select" id="mine-cur">' + curOpts + '</select></div>' +
+        '<div class="mine-row"><span class="mine-ico">🌙</span>' +
+          '<span class="mine-main"><b>深色模式</b><small>夜里看屏幕不刺眼</small></span>' +
+          '<select class="mine-select" id="mine-theme">' + thOpts + '</select></div>' +
+        mineRow('↩️', '恢复备份', '从 JSON 备份合并回来', 'data-mine="restore"') +
+        mineRow('📥', '导入 CSV', '从表格文件补充记录', 'data-mine="importCsv"') +
+      '</div>' +
+      '<div class="mine-title">分享</div>' +
+      '<div class="mine-card">' +
+        mineRow('🎨', '生成装备图片', '做一张可以发出去的装备海报', 'data-mine="poster"') +
+      '</div>' +
+      '<div class="mine-foot">装备台账 · 数据只存在你的设备里</div>';
+  }
+
+  /* ---------- 分类管理 ---------- */
+  function catCounts() {
+    var counts = {};
+    DB.items.forEach(function (it) {
+      if (it.deleted) return;
+      var c = it.cat || '其他';
+      counts[c] = (counts[c] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function openCats() {
+    renderCatsList();
+    openSheet('#cats-sheet');
+  }
+
+  function renderCatsList() {
+    var counts = catCounts();
+    var extra = Object.keys(counts).filter(function (c) { return CATS.indexOf(c) < 0; });
+    var all = CATS.concat(extra);
+    $('#cats-list').innerHTML = all.map(function (c) {
+      return '<div class="cat-row">' +
+        '<span class="cat-name">' + esc(c) + '</span>' +
+        '<span class="cat-count">' + (counts[c] || 0) + ' 件</span>' +
+        '<button class="cat-act" data-cat-rename="' + esc(c) + '">改名</button>' +
+        '<button class="cat-act danger" data-cat-del="' + esc(c) + '">删除</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function updateEditorCats() {
+    var sel = $('#editor-cat');
+    if (!sel) return;
+    var cur = sel.value;
+    sel.innerHTML = CATS.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('');
+    if (CATS.indexOf(cur) >= 0) sel.value = cur;
+  }
+
+  function refreshAfterCats() {
+    saveCats();
+    renderCatsList();
+    renderCatChips();
+    renderAssets();
+    renderStats();
+    renderMine();
+    updateEditorCats();
+  }
+
+  function addCat() {
+    var input = $('#cat-new');
+    var name = input.value.trim();
+    if (!name) { toast('先输入分类名称'); input.focus(); return; }
+    if (name.length > 8) { toast('分类名最多 8 个字'); return; }
+    if (CATS.indexOf(name) >= 0) { toast('已经有这个分类了'); return; }
+    CATS.push(name);
+    input.value = '';
+    refreshAfterCats();
+    toast('已添加「' + name + '」');
+  }
+
+  function renameCat(name) {
+    var next = window.prompt('把「' + name + '」改成：', name);
+    if (next == null) return;
+    next = String(next).trim();
+    if (!next || next === name) return;
+    if (next.length > 8) { toast('分类名最多 8 个字'); return; }
+    if (CATS.indexOf(next) >= 0) { toast('已经有同名分类了'); return; }
+
+    var i = CATS.indexOf(name);
+    if (i >= 0) CATS[i] = next;
+    else CATS.push(next); /* 历史遗留分类，补进列表 */
+    DB.items.forEach(function (it) { if (it.cat === name) it.cat = next; });
+    if (state.cat === name) state.cat = next;
+    saveAll();
+    refreshAfterCats();
+    toast('已改名');
+  }
+
+  function deleteCat(name) {
+    if (CATS.length <= 1) { toast('至少保留一个分类'); return; }
+    var n = 0;
+    DB.items.forEach(function (it) { if (!it.deleted && it.cat === name) n++; });
+    var rest = CATS.filter(function (c) { return c !== name; });
+    var fallback = rest.indexOf('其他') >= 0 ? '其他' : rest[0];
+    var msg = n
+      ? '「' + name + '」下还有 ' + n + ' 件物品，删除后会移到「' + fallback + '」。继续吗？'
+      : '删除分类「' + name + '」？';
+    if (!window.confirm(msg)) return;
+
+    CATS = rest;
+    DB.items.forEach(function (it) { if (it.cat === name) it.cat = fallback; });
+    if (state.cat === name) state.cat = '全部分类';
+    saveAll();
+    refreshAfterCats();
+    toast('已删除「' + name + '」');
+  }
+
+  /* ---------- 生成装备图片 ---------- */
+  var POSTER_BGS = [
+    { name: '蓝紫', from: '#4354f0', to: '#7c8bff', ink: '#ffffff', soft: 'rgba(255,255,255,.16)' },
+    { name: '夜幕', from: '#15171d', to: '#303646', ink: '#ffffff', soft: 'rgba(255,255,255,.10)' },
+    { name: '暖橙', from: '#e8602f', to: '#ffb27a', ink: '#ffffff', soft: 'rgba(255,255,255,.18)' },
+    { name: '墨绿', from: '#0d4630', to: '#2f8f5b', ink: '#ffffff', soft: 'rgba(255,255,255,.14)' },
+    { name: '米白', from: '#f3ecdf', to: '#dfd3bd', ink: '#3a3327', soft: 'rgba(58,51,39,.08)' }
+  ];
+  var poster = { bg: 0, gearId: null };
+
+  function posterGear() {
+    return DB.gear.find(function (g) { return g.id === poster.gearId && !g.deleted; }) || null;
+  }
+
+  function openPoster() {
+    var list = DB.gear.filter(function (g) { return !g.deleted; });
+    if (!list.length) { toast('装备库还是空的，先加一件装备'); return; }
+
+    var sel = $('#poster-gear');
+    sel.innerHTML = list.map(function (g) {
+      return '<option value="' + esc(g.id) + '">' + esc(g.name) + '</option>';
+    }).join('');
+    if (!poster.gearId || !list.some(function (g) { return g.id === poster.gearId; })) {
+      poster.gearId = list[0].id;
+    }
+    sel.value = poster.gearId;
+
+    var saved = '';
+    try { saved = localStorage.getItem('gearLedger.posterTitle') || ''; } catch (e) {}
+    $('#poster-title').value = saved || '我的装备库';
+
+    renderPosterBgs();
+    drawPoster();
+    openSheet('#poster-sheet');
+  }
+
+  function renderPosterBgs() {
+    $('#poster-bgs').innerHTML = POSTER_BGS.map(function (b, i) {
+      return '<button type="button" class="pbg' + (i === poster.bg ? ' on' : '') + '" data-pbg="' + i +
+        '" title="' + b.name + '" style="background:linear-gradient(135deg,' + b.from + ',' + b.to + ')"></button>';
+    }).join('');
+  }
+
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  }
+
+  function wrapText(g, text, maxW, maxLines) {
+    var out = [], line = '';
+    for (var i = 0; i < text.length; i++) {
+      var test = line + text[i];
+      if (line && g.measureText(test).width > maxW) {
+        out.push(line);
+        line = text[i];
+        if (out.length >= maxLines) break;
+      } else {
+        line = test;
+      }
+    }
+    if (out.length < maxLines && line) out.push(line);
+    if (out.length === maxLines && out.join('').length < text.length) {
+      out[maxLines - 1] = out[maxLines - 1].slice(0, -1) + '…';
+    }
+    return out;
+  }
+
+  function drawTags(g, tags, cx, y, maxW, sans) {
+    g.font = '600 22px ' + sans;
+    var h = 46, padX = 22, gap = 10;
+    var rows = [[]], rowW = 0;
+    tags.forEach(function (t) {
+      var w = g.measureText(t).width + padX * 2;
+      if (rowW + w > maxW && rows[rows.length - 1].length) {
+        rows.push([]);
+        rowW = 0;
+      }
+      rows[rows.length - 1].push({ t: t, w: w });
+      rowW += w + gap;
+    });
+    g.textAlign = 'center';
+    rows.forEach(function (row, ri) {
+      var total = row.reduce(function (a, b) { return a + b.w + gap; }, -gap);
+      var x = cx - total / 2;
+      row.forEach(function (item) {
+        g.fillStyle = '#f2f4f9';
+        roundRect(g, x, y + ri * (h + 12), item.w, h, 14);
+        g.fill();
+        g.fillStyle = '#5d6272';
+        g.fillText(item.t, x + item.w / 2, y + ri * (h + 12) + 30);
+        x += item.w + gap;
+      });
+    });
+    return y + rows.length * (h + 12);
+  }
+
+  function drawPoster() {
+    var cv = $('#poster-canvas');
+    if (!cv) return;
+    var W = cv.width, H = cv.height;
+    var g = cv.getContext('2d');
+    var bg = POSTER_BGS[poster.bg] || POSTER_BGS[0];
+    var style = $('#poster-style').value;
+    var title = ($('#poster-title').value || '').trim() || '我的装备库';
+    var gear = posterGear();
+    var show = {};
+    $$('#poster-checks input').forEach(function (n) { show[n.value] = n.checked; });
+
+    g.clearRect(0, 0, W, H);
+    var grad = g.createLinearGradient(0, 0, W, H);
+    grad.addColorStop(0, bg.from);
+    grad.addColorStop(1, bg.to);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, W, H);
+
+    g.fillStyle = bg.soft;
+    g.beginPath(); g.arc(W * .88, H * .1, W * .3, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(W * .06, H * .94, W * .24, 0, Math.PI * 2); g.fill();
+
+    var sans = '"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif';
+    g.textBaseline = 'alphabetic';
+    g.textAlign = 'left';
+    g.fillStyle = bg.ink;
+    g.globalAlpha = .72;
+    g.font = '600 26px ' + sans;
+    g.fillText(title.slice(0, 16), 64, 96);
+    g.globalAlpha = 1;
+
+    if (!gear) {
+      g.textAlign = 'center';
+      g.font = '700 34px ' + sans;
+      g.fillStyle = bg.ink;
+      g.fillText('先去装备库加一件装备', W / 2, H / 2);
+      return;
+    }
+
+    var name = gear.name || '未命名';
+    var meta = [gear.brand, gear.type].filter(Boolean).join(' · ');
+    var price = Number(gear.refPrice) || 0;
+    var tags = (gear.tags || []).slice(0, 4);
+    var specs = (gear.specs || []).slice(0, 3);
+
+    if (style === 'card') {
+      var cx = 56, cy = 170, cw = W - 112, ch = H - 300;
+      g.fillStyle = 'rgba(255,255,255,.94)';
+      roundRect(g, cx, cy, cw, ch, 34);
+      g.fill();
+
+      g.textAlign = 'center';
+      g.font = '76px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
+      g.fillText(gear.icon || '📦', W / 2, cy + 150);
+
+      g.fillStyle = '#14161c';
+      g.font = '800 46px ' + sans;
+      var nameLines = wrapText(g, name, cw - 96, 2);
+      var ny = cy + 232;
+      nameLines.forEach(function (ln, i) { g.fillText(ln, W / 2, ny + i * 56); });
+
+      if (show.brand && meta) {
+        g.fillStyle = '#8b90a0';
+        g.font = '500 24px ' + sans;
+        g.fillText(meta, W / 2, ny + nameLines.length * 56 + 4);
+      }
+
+      var y = ny + nameLines.length * 56 + (show.brand && meta ? 64 : 26);
+
+      if (show.price && price) {
+        g.fillStyle = '#4354f0';
+        g.font = '800 54px ' + sans;
+        g.fillText(CUR + money2(price), W / 2, y + 42);
+        g.fillStyle = '#a0a5b3';
+        g.font = '500 22px ' + sans;
+        g.fillText('参考价', W / 2, y + 80);
+        y += 122;
+      }
+
+      if (show.tags && tags.length) y = drawTags(g, tags, W / 2, y + 8, cw - 120, sans);
+
+      if (show.specs && specs.length) {
+        var sy = y + 24;
+        specs.forEach(function (s, i) {
+          if (sy + i * 44 > cy + ch - 34) return;
+          g.textAlign = 'left';
+          g.fillStyle = '#8b90a0';
+          g.font = '500 22px ' + sans;
+          g.fillText(String(s.k), cx + 52, sy + i * 44);
+          g.textAlign = 'right';
+          g.fillStyle = '#14161c';
+          g.font = '700 22px ' + sans;
+          g.fillText(String(s.v), cx + cw - 52, sy + i * 44);
+        });
+      }
+    } else {
+      g.textAlign = 'center';
+      g.font = '96px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
+      g.fillStyle = bg.ink;
+      g.fillText(gear.icon || '📦', W / 2, 370);
+
+      g.font = '800 54px ' + sans;
+      var lines = wrapText(g, name, W - 160, 2);
+      lines.forEach(function (ln, i) { g.fillText(ln, W / 2, 486 + i * 66); });
+
+      var m2 = 486 + lines.length * 66;
+      if (show.brand && meta) {
+        g.globalAlpha = .8;
+        g.font = '500 26px ' + sans;
+        g.fillText(meta, W / 2, m2 + 8);
+        g.globalAlpha = 1;
+        m2 += 54;
+      }
+      if (show.price && price) {
+        g.font = '800 58px ' + sans;
+        g.fillText(CUR + money2(price), W / 2, m2 + 78);
+        m2 += 108;
+      }
+      if (show.tags && tags.length) {
+        g.globalAlpha = .85;
+        g.font = '500 24px ' + sans;
+        g.fillText(tags.map(function (t) { return '#' + t; }).join('   '), W / 2, m2 + 50);
+        g.globalAlpha = 1;
+        m2 += 52;
+      }
+      if (show.specs && specs.length) {
+        g.globalAlpha = .8;
+        g.font = '500 23px ' + sans;
+        var specTxt = specs.map(function (s) { return s.k + ' ' + s.v; }).join('   ');
+        g.fillText(specTxt, W / 2, m2 + 50);
+        g.globalAlpha = 1;
+      }
+    }
+
+    g.textAlign = 'center';
+    g.globalAlpha = .55;
+    g.fillStyle = bg.ink;
+    g.font = '500 22px ' + sans;
+    g.fillText('装备台账 · 记录每一件的成本', W / 2, H - 56);
+    g.globalAlpha = 1;
+  }
+
+  function savePoster() {
+    var cv = $('#poster-canvas');
+    if (!cv) return;
+    var gear = posterGear();
+    var fname = '装备图_' + (gear ? gear.name : '海报') + '.png';
+    try {
+      cv.toBlob(function (blob) {
+        if (!blob) { toast('图片生成失败'); return; }
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fname;
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+        toast('图片已保存');
+      }, 'image/png');
+    } catch (e) { toast('图片生成失败'); }
+  }
+
+  function pickFile(accept, cb) {
+    var f = document.createElement('input');
+    f.type = 'file';
+    f.accept = accept;
+    f.onchange = function () { if (f.files[0]) cb(f.files[0]); };
+    f.click();
   }
 
   /* =========================================================
@@ -1077,6 +1649,7 @@
     if (name === 'gear') renderGear();
     if (name === 'stats') renderStats();
     if (name === 'assets') renderAssets();
+    if (name === 'mine') renderMine();
     window.scrollTo(0, 0);
   }
 
@@ -1251,10 +1824,14 @@
         if (seen[key]) { skip++; continue; }
         seen[key] = true;
 
+        // CSV 里的自定义分类自动补进来，不要都塞到「其他」
+        var cName = String(cols[1] || '').trim() || '其他';
+        if (CATS.indexOf(cName) < 0) { CATS.push(cName); saveCats(); }
+
         DB.items.unshift({
           id: uid(),
           name: name,
-          cat: CATS.indexOf(cols[1]) >= 0 ? cols[1] : '其他',
+          cat: cName,
           purchaseDate: date,
           price: price,
           qty: qty,
@@ -1384,7 +1961,6 @@
           cloudBtns +
           '<button class="btn-main ghost" data-menu="backup">导出备份（JSON）</button>' +
           '<button class="btn-main ghost" data-menu="restore">导入备份（JSON）</button>' +
-          '<button class="btn-main ghost" data-menu="export">导出 CSV</button>' +
           '<button class="btn-main ghost" data-menu="import">导入 CSV</button>' +
           '<button class="btn-main ghost" data-menu="reset">恢复示例数据</button>' +
           '<button class="btn-main ghost" data-menu="clear" style="color:#f04438;border-color:#ffe3e1">清空全部记录</button>' +
@@ -1426,6 +2002,17 @@
     // 状态 tab
     var st = el.closest('[data-state]');
     if (st) { state.status = st.getAttribute('data-state'); renderAssets(); return; }
+
+    // 空状态：一键回到全部
+    if (el.closest('#asset-empty-reset')) {
+      state.cat = '全部分类';
+      state.status = '全部';
+      state.q = '';
+      var resetQ = $('#q');
+      if (resetQ) resetQ.value = '';
+      renderAssets();
+      return;
+    }
 
     // 分类 chip
     var chip = el.closest('[data-cat]');
@@ -1557,6 +2144,36 @@
       }
       return;
     }
+
+    // 我的：分类管理
+    if (el.closest('#mine-cats')) { openCats(); return; }
+    if (el.closest('#cat-add')) { addCat(); return; }
+    var catRen = el.closest('[data-cat-rename]');
+    if (catRen) { renameCat(catRen.getAttribute('data-cat-rename')); return; }
+    var catDel = el.closest('[data-cat-del]');
+    if (catDel) { deleteCat(catDel.getAttribute('data-cat-del')); return; }
+
+    // 我的：数据与分享
+    var mineAct = el.closest('[data-mine]');
+    if (mineAct) {
+      var mact = mineAct.getAttribute('data-mine');
+      if (mact === 'csv') exportCSV();
+      if (mact === 'backup') exportBackup();
+      if (mact === 'restore') pickFile('.json,application/json', importBackup);
+      if (mact === 'importCsv') pickFile('.csv,text/csv', importCSV);
+      if (mact === 'poster') openPoster();
+      return;
+    }
+
+    // 生成装备图片
+    var pbgBtn = el.closest('[data-pbg]');
+    if (pbgBtn) {
+      poster.bg = Number(pbgBtn.getAttribute('data-pbg')) || 0;
+      renderPosterBgs();
+      drawPoster();
+      return;
+    }
+    if (el.closest('#poster-save')) { savePoster(); return; }
 
     // 菜单
     var mi = el.closest('[data-menu]');
@@ -1734,11 +2351,29 @@
     });
   });
 
+  /* 我的：下拉与输入 */
+  document.addEventListener('change', function (ev) {
+    var el = ev.target;
+    if (el.id === 'mine-cur') { setCur(el.value); return; }
+    if (el.id === 'mine-theme') { setTheme(el.value); return; }
+    if (el.id === 'poster-gear') { poster.gearId = el.value; drawPoster(); return; }
+    if (el.id === 'poster-style') { drawPoster(); return; }
+    if (el.closest && el.closest('#poster-checks')) { drawPoster(); return; }
+  });
+
+  document.addEventListener('input', function (ev) {
+    var el = ev.target;
+    if (el.id === 'poster-title') {
+      try { localStorage.setItem('gearLedger.posterTitle', el.value); } catch (e) {}
+      drawPoster();
+    }
+  });
+
   /* =========================================================
      初始化
      ========================================================= */
   $('#editor-cat').innerHTML = CATS.map(function (c) {
-    return '<option>' + c + '</option>';
+    return '<option>' + esc(c) + '</option>';
   }).join('');
 
   $('#icon-picker').innerHTML = ICONS.map(function (ic) {
@@ -1752,6 +2387,22 @@
   $('#gicon-picker').innerHTML = ICONS.map(function (ic) {
     return '<button type="button" data-gicon="' + ic + '">' + ic + '</button>';
   }).join('');
+
+  /* 外观与货币 */
+  applyTheme();
+  applyCur();
+  renderMine();
+
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    var onScheme = function () { if (getTheme() === 'auto') applyTheme(); };
+    if (mq.addEventListener) mq.addEventListener('change', onScheme);
+    else if (mq.addListener) mq.addListener(onScheme);
+  }
+
+  $('#cat-new').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); addCat(); }
+  });
 
   // 登录
   if ($('#login-btn')) {
@@ -1802,6 +2453,18 @@
       toast('离线模式：先存本机，连接后会自动合并');
     });
   }
+
+  /* 横滑筛选条：滚到头时取消右缘渐隐 */
+  ['#cat-chips', '#gear-chips'].forEach(function (sel) {
+    var box = $(sel);
+    if (!box) return;
+    box.addEventListener('scroll', function () { updateChipsEdge(box); });
+    bindChipsDrag(box);
+  });
+  window.addEventListener('resize', function () {
+    updateChipsEdge($('#cat-chips'));
+    updateChipsEdge($('#gear-chips'));
+  });
 
   renderAssets();
   renderGear();
