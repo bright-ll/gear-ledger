@@ -3,13 +3,13 @@
    策略：联网时先取最新文件，断网时用缓存。
    这样上传新版本后刷新就能看到，不会被旧缓存卡住。
    ========================================================= */
-var CACHE = 'gear-ledger-v1';
+var CACHE = 'gear-ledger-v2';
 var CORE = [
   './index.html',
-  './styles.css',
-  './app.js',
-  './cloud.js',
-  './config.js',
+  './styles.css?v=3',
+  './app.js?v=3',
+  './cloud.js?v=3',
+  './config.js?v=3',
   './manifest.json',
   './icon.svg',
   './icon-192.png',
@@ -43,7 +43,7 @@ self.addEventListener('fetch', function (e) {
   if (url.origin !== self.location.origin) return;
 
   e.respondWith(
-    fetch(req).then(function (res) {
+    fetch(req, { cache: 'no-store' }).then(function (res) {
       if (res && res.status === 200 && res.type === 'basic') {
         var copy = res.clone();
         caches.open(CACHE).then(function (c) { c.put(req, copy); });
