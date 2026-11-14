@@ -267,6 +267,73 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 }
 .filter-btn.on .filter-count{display:inline-block}
 
+/* ---------- 装备库：搜索 + 视图切换 ---------- */
+.gear-search{display:flex;align-items:center;gap:8px;margin-top:14px}
+.gear-search .searchbar{margin-top:0;flex:1;min-width:0}
+.viewswitch{display:flex;gap:6px;flex:none}
+.vsw{
+  width:34px;height:34px;border-radius:50%;background:#fff;
+  display:grid;place-items:center;color:#9aa0ae;
+  box-shadow:0 2px 8px rgba(20,22,28,.06);transition:.15s;
+}
+.vsw svg{width:17px;height:17px}
+.vsw.on{background:var(--blue-soft);color:var(--blue)}
+.gear-tools{display:flex;align-items:center;gap:10px;padding:0 14px;margin-top:12px}
+.gear-tools .chips{flex:1;min-width:0;padding:0 6px 0 0}
+.gear-tools .chip{padding:6px 13px;font-size:13.5px}
+.gear-tools .filter-btn{flex:none;background:#fff;box-shadow:0 2px 8px rgba(20,22,28,.06)}
+
+/* ---------- 装备库：分组 ---------- */
+.gear-groups{padding:12px 14px 0}
+.gear-group{margin-bottom:18px}
+.gg-head{
+  width:100%;display:flex;align-items:center;gap:8px;
+  padding:4px 2px 10px;text-align:left;
+}
+.gg-ico{font-size:17px;line-height:1}
+.gg-name{font-size:15px;font-weight:800;letter-spacing:-.01em}
+.gg-chev{width:15px;height:15px;color:#a0a5b3;flex:none;transition:transform .18s}
+.gear-group.col .gg-chev{transform:rotate(-90deg)}
+.gg-sum{
+  margin-left:auto;font-size:12px;color:#a0a5b3;white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+.gear-group.col .gg-body{display:none}
+
+/* 宫格视图 */
+.view-grid .gg-body{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.card-w{font-size:12px;color:#8b90a0;font-variant-numeric:tabular-nums}
+
+/* 文字视图 */
+.g-text{
+  display:grid;grid-template-columns:1fr auto;gap:3px 10px;
+  background:#fff;border-radius:12px;padding:11px 14px;margin-bottom:8px;
+  cursor:pointer;transition:transform .15s;
+}
+.g-text:active{transform:scale(.99)}
+.gt-name{font-size:15px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gt-w{font-size:12.5px;color:#8b90a0;text-align:right;font-variant-numeric:tabular-nums}
+.gt-sub{font-size:12px;color:#a0a5b3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gt-p{font-size:14px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums}
+
+/* 列表视图 */
+.g-list{
+  display:flex;align-items:center;gap:12px;
+  background:#fff;border-radius:14px;padding:10px 14px;margin-bottom:8px;
+  cursor:pointer;transition:transform .15s;
+}
+.g-list:active{transform:scale(.99)}
+.gl-ico{
+  width:44px;height:44px;flex:none;border-radius:12px;
+  display:grid;place-items:center;font-size:22px;
+}
+.gl-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.gl-main b{font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gl-main small{font-size:11.5px;color:#a0a5b3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gl-side{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.gl-side b{font-size:14.5px;font-weight:800;font-variant-numeric:tabular-nums}
+.gl-side small{font-size:11.5px;color:#8b90a0;font-variant-numeric:tabular-nums}
+
 /* 装备筛选弹层 */
 .sheet-mid{
   height:auto !important;max-height:82vh;margin-top:auto;
@@ -279,7 +346,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .fchips .chip{padding:7px 13px;font-size:13px;background:#fff}
 
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;padding:10px 14px 0}
-@media(max-width:330px){.grid{grid-template-columns:1fr}}
+@media(max-width:330px){.grid{grid-template-columns:1fr}.view-grid .gg-body{grid-template-columns:1fr}}
 .card{
   background:#fff;border-radius:var(--radius);overflow:hidden;
   display:flex;flex-direction:column;
@@ -498,7 +565,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
     display:grid;grid-template-columns:1fr 1fr;gap:12px;
     align-items:start;align-content:start;
   }
-  .grid{grid-template-columns:repeat(3,1fr)}
+  .grid,.view-grid .gg-body{grid-template-columns:repeat(3,1fr)}
 
   /* 底部导航：通栏 → 浮动胶囊 */
   .tabbar{
@@ -547,7 +614,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 
   /* 装备库 / 分析：限制阅读宽度 */
   #view-gear,#view-stats{max-width:1000px;margin:0 auto}
-  #view-gear .grid{grid-template-columns:repeat(4,1fr)}
+  #view-gear .grid,#view-gear .view-grid .gg-body{grid-template-columns:repeat(4,1fr)}
 
   /* 主按钮：通栏 → 右对齐胶囊 */
   #view-assets > .dock,

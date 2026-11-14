@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>我的物品 · 日均成本台账</title>
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=4">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -85,14 +85,29 @@
       <h1>装备库</h1>
       <p class="sub">看参数、比参考价，一键加入我的资产。</p>
       <button class="icon-btn gear-add" id="btn-g-new-top" title="新增装备">+</button>
-      <div class="searchbar">
-        <span>🔍</span>
-        <input id="gq" type="search" placeholder="搜索装备、品牌、面料" autocomplete="off">
-        <button class="filter-btn" id="btn-gfilter">筛选<span class="filter-count" id="gfilter-count"></span></button>
+      <div class="gear-search">
+        <div class="searchbar">
+          <span>🔍</span>
+          <input id="gq" type="search" placeholder="搜索装备、品牌、面料" autocomplete="off">
+        </div>
+        <div class="viewswitch" id="gear-viewswitch">
+          <button class="vsw" data-gview="text" title="文字视图" aria-label="文字视图">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          </button>
+          <button class="vsw on" data-gview="grid" title="宫格视图" aria-label="宫格视图">
+            <svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+          </button>
+          <button class="vsw" data-gview="list" title="列表视图" aria-label="列表视图">
+            <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1"/></svg>
+          </button>
+        </div>
       </div>
     </header>
-    <div class="chips scroll-x" id="gear-chips"></div>
-    <div class="grid" id="gear-grid"></div>
+    <div class="gear-tools">
+      <div class="chips scroll-x" id="gear-chips"></div>
+      <button class="filter-btn" id="btn-gfilter">筛选<span class="filter-count" id="gfilter-count"></span></button>
+    </div>
+    <div class="gear-groups view-grid" id="gear-grid"></div>
     <div class="empty hidden" id="gear-empty">
       <div class="empty-ico">🔍</div>
       <p>没有匹配的装备</p>
@@ -303,9 +318,9 @@
 <!-- ================= 通用图标选择 ================= -->
 <div class="toast" id="toast"></div>
 
-<script src="config.js?v=3"></script>
-<script src="cloud.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="cloud.js?v=4"></script>
+<script src="app.js?v=4"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {

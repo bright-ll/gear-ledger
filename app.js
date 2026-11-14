@@ -252,6 +252,13 @@
     gearType: '全部',
     gearPrice: '全部',
     gearFav: false,
+    gearView: (function () {
+      try {
+        var v = localStorage.getItem('gear-ledger-view');
+        return (v === 'text' || v === 'list') ? v : 'grid';
+      } catch (e) { return 'grid'; }
+    })(),
+    gearCollapsed: {},
     detailId: null,
     gearId: null,
     editingId: null,
@@ -596,6 +603,80 @@
     });
   }
 
+  var CAT_ICON = {
+    '户外': '🏕', '睡眠': '🌙', '背负': '🎒', '鞋靴': '🥾',
+    '照明': '🔦', '炊具': '🔥', '其他': '📦'
+  };
+  function catIcon(c) { return CAT_ICON[c] || '📦'; }
+
+  /* 从标签/参数里识别重量，取第一个能认的 g / kg */
+  function gearWeight(g) {
+    var hay = (g.tags || []).slice();
+    (g.specs || []).forEach(function (s) { hay.push((s.k || '') + ' ' + (s.v || '')); });
+    for (var i = 0; i < hay.length; i++) {
+      var m = String(hay[i]).match(/(\d+(?:\.\d+)?)\s*(kg|g)\b/i);
+      if (m) return Math.round(parseFloat(m[1]) * (m[2].toLowerCase() === 'kg' ? 1000 : 1));
+    }
+    return 0;
+  }
+
+  function fmtWeight(w) {
+    if (!w) return '';
+    if (w >= 1000) return (Math.round(w / 10) / 100) + 'kg';
+    return w + 'g';
+  }
+
+  function gearMeta(g) {
+    var bits = [];
+    if (g.brand) bits.push(g.brand);
+    if (g.type) bits.push(g.type);
+    return bits.join(' · ') || g.cat || '';
+  }
+
+  /* ---------- 三种视图的单条渲染 ---------- */
+  function gearCardHtml(g) {
+    var own = ownedItem(g.id);
+    var oc = own ? calc(own) : null;
+    var w = fmtWeight(gearWeight(g));
+    return '<article class="card" data-gid="' + g.id + '">' +
+      '<div class="card-media" style="background:' + iconBg(g.cat) + '" data-open="' + g.id + '">' +
+        '<span class="card-emoji">' + esc(g.icon || '📦') + '</span>' +
+        '<button class="heart ' + (g.fav ? 'on' : '') + '" data-fav="' + g.id + '">' + (g.fav ? '♥' : '♡') + '</button>' +
+        (own ? '<span class="own-badge">已在资产</span>' : '') +
+      '</div>' +
+      '<div class="card-body">' +
+        (g.brand ? '<div class="card-brand">' + esc(g.brand) + '</div>' : '') +
+        '<h3 class="card-name" data-open="' + g.id + '">' + esc(g.name) + '</h3>' +
+        '<div class="card-badges">' + (g.tags || []).slice(0, 3).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' +
+        '<div class="card-foot"><span class="price">¥' + money2(g.refPrice) + '</span>' +
+          (own ? '<span class="own-tag">' + (oc.perUse == null ? oc.days + '天' : '¥' + money(oc.perUse) + '/次') + '</span>'
+               : (w ? '<span class="card-w">' + w + '</span>' : '')) +
+        '</div>' +
+        '<button class="card-add' + (own ? ' done' : '') + '" data-gadd="' + g.id + '">' +
+          (own ? '已在资产中' : '加入我的资产') + '</button>' +
+      '</div>' +
+    '</article>';
+  }
+
+  function gearTextHtml(g) {
+    var w = fmtWeight(gearWeight(g));
+    return '<div class="g-text" data-open="' + g.id + '">' +
+      '<span class="gt-name">' + esc(g.name) + '</span>' +
+      '<span class="gt-w">' + w + '</span>' +
+      '<span class="gt-sub">' + esc(gearMeta(g)) + '</span>' +
+      '<span class="gt-p">¥' + money2(g.refPrice) + '</span>' +
+    '</div>';
+  }
+
+  function gearListHtml(g) {
+    var w = fmtWeight(gearWeight(g));
+    return '<div class="g-list" data-open="' + g.id + '">' +
+      '<span class="gl-ico" style="background:' + iconBg(g.cat) + '">' + esc(g.icon || '📦') + '</span>' +
+      '<span class="gl-main"><b>' + esc(g.name) + '</b><small>' + esc(gearMeta(g)) + '</small></span>' +
+      '<span class="gl-side"><b>¥' + money2(g.refPrice) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
+    '</div>';
+  }
+
   function renderGear() {
     var cats = ['全部'].concat(GEAR_CATS);
     DB.gear.forEach(function (g) {
@@ -606,28 +687,49 @@
     }).join('');
 
     var list = filteredGear();
+    var view = state.gearView;
 
-    $('#gear-grid').innerHTML = list.map(function (g) {
-      var own = ownedItem(g.id);
-      var oc = own ? calc(own) : null;
-      return '<article class="card" data-gid="' + g.id + '">' +
-        '<div class="card-media" style="background:' + iconBg(g.cat) + '" data-open="' + g.id + '">' +
-          '<span class="card-emoji">' + esc(g.icon || '📦') + '</span>' +
-          '<button class="heart ' + (g.fav ? 'on' : '') + '" data-fav="' + g.id + '">' + (g.fav ? '♥' : '♡') + '</button>' +
-          (own ? '<span class="own-badge">已在资产</span>' : '') +
-        '</div>' +
-        '<div class="card-body">' +
-          (g.brand ? '<div class="card-brand">' + esc(g.brand) + '</div>' : '') +
-          '<h3 class="card-name" data-open="' + g.id + '">' + esc(g.name) + '</h3>' +
-          '<div class="card-badges">' + (g.tags || []).slice(0, 3).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' +
-          '<div class="card-foot"><span class="price">¥' + money2(g.refPrice) + '</span>' +
-            (own ? '<span class="own-tag">' + (oc.perUse == null ? oc.days + '天' : '¥' + money(oc.perUse) + '/次') + '</span>' : '') +
-          '</div>' +
-          '<button class="card-add' + (own ? ' done' : '') + '" data-gadd="' + g.id + '">' +
-            (own ? '已在资产中' : '加入我的资产') + '</button>' +
-        '</div>' +
-      '</article>';
+    /* 按分类分组，组顺序与 chips 一致 */
+    var groups = {}, order = [];
+    list.forEach(function (g) {
+      var k = g.cat || '其他';
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(g);
+    });
+    order.sort(function (a, b) {
+      var ia = cats.indexOf(a), ib = cats.indexOf(b);
+      if (ia < 0) ia = 999;
+      if (ib < 0) ib = 999;
+      return ia - ib;
+    });
+
+    var rowHtml = view === 'text' ? gearTextHtml : (view === 'list' ? gearListHtml : gearCardHtml);
+
+    var box = $('#gear-grid');
+    box.className = 'gear-groups view-' + view;
+    box.innerHTML = order.map(function (k) {
+      var items = groups[k], sum = 0, wsum = 0, hasW = false;
+      items.forEach(function (g) {
+        sum += Number(g.refPrice) || 0;
+        var w = gearWeight(g);
+        if (w) { wsum += w; hasW = true; }
+      });
+      var sumTxt = items.length + '件' + (hasW ? ' · ' + fmtWeight(wsum) : '') + ' · ¥' + money2(sum);
+      return '<section class="gear-group' + (state.gearCollapsed[k] ? ' col' : '') + '">' +
+        '<button class="gg-head" data-gcol="' + esc(k) + '">' +
+          '<span class="gg-ico">' + catIcon(k) + '</span>' +
+          '<span class="gg-name">' + esc(k) + '</span>' +
+          '<svg class="gg-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>' +
+          '<span class="gg-sum">' + sumTxt + '</span>' +
+        '</button>' +
+        '<div class="gg-body">' + items.map(rowHtml).join('') + '</div>' +
+      '</section>';
     }).join('');
+
+    var btns = document.querySelectorAll('#gear-viewswitch [data-gview]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('on', btns[i].getAttribute('data-gview') === view);
+    }
 
     $('#gear-empty').classList.toggle('hidden', list.length > 0);
     updateGearFilterBtn();
@@ -1287,6 +1389,24 @@
     // 装备库分类
     var gchip = el.closest('[data-gcat]');
     if (gchip) { state.gearCat = gchip.getAttribute('data-gcat'); renderGear(); return; }
+
+    // 装备库视图切换：文字 / 宫格 / 列表
+    var gview = el.closest('[data-gview]');
+    if (gview) {
+      state.gearView = gview.getAttribute('data-gview');
+      try { localStorage.setItem('gear-ledger-view', state.gearView); } catch (e) {}
+      renderGear();
+      return;
+    }
+
+    // 分组折叠
+    var gcol = el.closest('[data-gcol]');
+    if (gcol) {
+      var ck = gcol.getAttribute('data-gcol');
+      state.gearCollapsed[ck] = !state.gearCollapsed[ck];
+      renderGear();
+      return;
+    }
 
     // 装备筛选
     if (el.closest('#btn-gfilter')) { openGearFilter(); return; }
