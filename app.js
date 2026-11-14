@@ -200,11 +200,17 @@
   }
 
   /* ---------- 状态 ---------- */
+  var hasLocal = !!load('items', null);
   var DB = {
-    items: load('items', null) || seedItems(),
+    items: hasLocal ? load('items', null) : seedItems(),
     gear: load('gear', null) || seedGear()
   };
-  if (!load('items', null)) saveAll();
+  if (!hasLocal) {
+    // 示例数据打上标记：永远不会被同步到云端
+    DB.items.forEach(function (x) { x.demo = true; });
+    DB.gear.forEach(function (x) { x.demo = true; });
+    saveAll();
+  }
 
   var state = {
     tab: 'assets',
@@ -521,6 +527,7 @@
 
     var q = state.gearQ.trim().toLowerCase();
     var list = DB.gear.filter(function (g) {
+      if (g.deleted) return false;
       if (state.gearCat !== '全部' && g.cat !== state.gearCat) return false;
       if (!q) return true;
       var hay = [g.name, g.brand, g.type, (g.tags || []).join(' ')].join(' ').toLowerCase();
@@ -979,8 +986,13 @@
         }
       }
       if (act === 'clear') {
-        if (confirm('清空全部记录？不可撤销，建议先导出 CSV。')) {
-          DB.items = []; saveAll(); renderAssets(); toast('已清空');
+        if (confirm('清空全部记录？会同时清空云端，不可撤销。建议先导出 CSV。')) {
+          var now = Date.now();
+          DB.items.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
+          DB.gear.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
+          saveAll();
+          renderAssets(); renderGear(); renderStats();
+          toast('已清空');
         }
       }
       if (act === 'connect') { openSheet('#login-sheet'); }

@@ -29,6 +29,11 @@
   function onStatus(cb) { statusCb = cb; if (cb) cb(status, lastError); }
 
   /* ---------- 合并（两种后端共用） ---------- */
+  // 示例数据不参与同步，避免污染真实账目
+  function real(list) {
+    return (list || []).filter(function (x) { return x && !x.demo; });
+  }
+
   function merge(localList, remoteList) {
     var map = {};
     (localList || []).forEach(function (d) { if (d && d.id) map[d.id] = d; });
@@ -172,8 +177,8 @@
       var id = await gist.ensureGist();
       var remote = await gist.read(id);
       var merged = {
-        items: merge(DB.items, remote.items),
-        gear: merge(DB.gear, remote.gear)
+        items: merge(real(DB.items), remote.items),
+        gear: merge(real(DB.gear), remote.gear)
       };
       await gist.write(id, merged);
       return merged;
@@ -280,8 +285,8 @@
         remote[COLLECTIONS[i]] = await cloudbase.fetchAll(COLLECTIONS[i]);
       }
       var merged = {
-        items: merge(DB.items, remote.items.map(cloudbase.clean)),
-        gear: merge(DB.gear, remote.gear.map(cloudbase.clean))
+        items: merge(real(DB.items), remote.items.map(cloudbase.clean)),
+        gear: merge(real(DB.gear), remote.gear.map(cloudbase.clean))
       };
       for (var j = 0; j < COLLECTIONS.length; j++) {
         await cloudbase.pushAll(COLLECTIONS[j], merged[COLLECTIONS[j]], remote[COLLECTIONS[j]]);
