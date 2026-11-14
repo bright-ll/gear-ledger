@@ -19,6 +19,7 @@
   var lastError = '';
   var timer = null;
   var syncing = false;
+  var pending = false;
 
   function setStatus(s, err) {
     status = s;
@@ -177,8 +178,8 @@
       var id = await gist.ensureGist();
       var remote = await gist.read(id);
       var merged = {
-        items: merge(real(DB.items), remote.items),
-        gear: merge(real(DB.gear), remote.gear)
+        items: merge(real(DB.items), real(remote.items)),
+        gear: merge(real(DB.gear), real(remote.gear))
       };
       await gist.write(id, merged);
       return merged;
@@ -285,8 +286,8 @@
         remote[COLLECTIONS[i]] = await cloudbase.fetchAll(COLLECTIONS[i]);
       }
       var merged = {
-        items: merge(real(DB.items), remote.items.map(cloudbase.clean)),
-        gear: merge(real(DB.gear), remote.gear.map(cloudbase.clean))
+        items: merge(real(DB.items), real(remote.items.map(cloudbase.clean))),
+        gear: merge(real(DB.gear), real(remote.gear.map(cloudbase.clean)))
       };
       for (var j = 0; j < COLLECTIONS.length; j++) {
         await cloudbase.pushAll(COLLECTIONS[j], merged[COLLECTIONS[j]], remote[COLLECTIONS[j]]);
@@ -308,7 +309,7 @@
   async function sync(DB) {
     if (!impl) return null;
     if (PROVIDER === 'gist' && !gist.token()) { setStatus('idle'); return null; }
-    if (syncing) return null;
+    if (syncing) { pending = true; return null; }
     syncing = true;
     setStatus('syncing');
     try {
@@ -320,6 +321,11 @@
       return null;
     } finally {
       syncing = false;
+      // 同步期间又有改动：等这一轮结束再补传一次，避免修改被漏掉
+      if (pending) {
+        pending = false;
+        sync(DB);
+      }
     }
   }
 

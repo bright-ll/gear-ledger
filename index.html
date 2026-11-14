@@ -8,6 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>我的物品 · 日均成本台账</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
 
@@ -57,6 +60,11 @@
       <button id="btn-q-clear">取消</button>
     </div>
 
+    <div class="demo-tip hidden" id="demo-tip">
+      <div>下方是示例数据。点任意一条进去看看，或点「新增」记下自己的第一件。</div>
+      <button class="text-btn" id="demo-tip-close">知道了</button>
+    </div>
+
     <div id="asset-list" class="list"></div>
 
     <div class="empty hidden" id="asset-empty">
@@ -76,9 +84,11 @@
       <div class="kicker">GEAR LIBRARY</div>
       <h1>装备库</h1>
       <p class="sub">看参数、比参考价，一键加入我的资产。</p>
+      <button class="icon-btn gear-add" id="btn-g-new-top" title="新增装备">+</button>
       <div class="searchbar">
         <span>🔍</span>
         <input id="gq" type="search" placeholder="搜索装备、品牌、面料" autocomplete="off">
+        <button class="filter-btn" id="btn-gfilter">筛选<span class="filter-count" id="gfilter-count"></span></button>
       </div>
     </header>
     <div class="chips scroll-x" id="gear-chips"></div>
@@ -87,7 +97,10 @@
       <div class="empty-ico">🔍</div>
       <p>没有匹配的装备</p>
     </div>
-    <div class="note">示例数据，可自行增删</div>
+    <div class="note">装备可以点开编辑或删除，也可以新增自己的</div>
+    <div class="dock">
+      <button class="btn-main" id="btn-g-new">新增装备</button>
+    </div>
   </section>
 
   <!-- ================= 分析 ================= -->
@@ -144,6 +157,62 @@
   </div>
 </div>
 
+<!-- ================= 装备新增/编辑 ================= -->
+<div class="sheet" id="geditor-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head geditor-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong id="geditor-title">新增装备</strong>
+      <button class="text-btn danger hidden" id="btn-gdel">删除</button>
+    </div>
+    <form class="sheet-scroll" id="geditor-form" autocomplete="off">
+      <div class="form-section">基本信息</div>
+      <div class="form-card">
+        <label class="row"><span>名称</span><input name="name" required placeholder="例如：三层压胶冲锋衣"></label>
+        <label class="row"><span>品牌</span><input name="brand" placeholder="选填"></label>
+        <label class="row"><span>分类</span><select name="cat" id="geditor-cat"></select></label>
+        <label class="row"><span>类型</span><input name="type" placeholder="例如：硬壳冲锋衣"></label>
+        <label class="row"><span>参考价</span><input name="refPrice" type="number" step="0.01" min="0" inputmode="decimal" placeholder="选填"></label>
+        <div class="row">
+          <span>图标</span>
+          <button type="button" class="icon-preview" id="gicon-preview">📦 <small>选择</small></button>
+        </div>
+        <div class="icon-picker hidden" id="gicon-picker"></div>
+        <label class="row"><span>收藏</span><input type="checkbox" name="fav" class="switch"></label>
+      </div>
+
+      <div class="form-section">详细资料（选填）</div>
+      <div class="form-card">
+        <label class="row col"><span>标签</span>
+          <input name="tags" placeholder="用逗号隔开，例如：GORE-TEX 3L, 20000mm, 420g">
+        </label>
+        <label class="row col"><span>参数</span>
+          <textarea name="specs" rows="3" placeholder="每行一条，用冒号分开，例如：&#10;面料: GORE-TEX 3L&#10;整衣重量: 420 g"></textarea>
+        </label>
+      </div>
+
+      <div class="dock">
+        <button type="submit" class="btn-main">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 装备筛选 ================= -->
+<div class="sheet" id="gfilter-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>筛选装备</strong>
+      <button class="text-btn" id="btn-gfilter-reset">重置</button>
+    </div>
+    <div class="sheet-scroll" id="gfilter-body"></div>
+    <div class="dock">
+      <button class="btn-main" id="btn-gfilter-apply">查看结果</button>
+    </div>
+  </div>
+</div>
+
 <!-- ================= 新增/编辑 ================= -->
 <div class="sheet" id="editor-sheet">
   <div class="sheet-panel">
@@ -184,6 +253,10 @@
 
         <label class="row"><span>分类</span>
           <select name="cat" id="editor-cat"></select>
+        </label>
+
+        <label class="row"><span>关联装备</span>
+          <select name="catalogId" id="editor-catalog"></select>
         </label>
 
         <label class="row"><span>使用状态</span>
@@ -233,5 +306,12 @@
 <script src="config.js"></script>
 <script src="cloud.js"></script>
 <script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
 </body>
 </html>
