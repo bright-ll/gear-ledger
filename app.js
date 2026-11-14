@@ -246,6 +246,12 @@
     cat: '全部分类',
     sort: 'date',
     q: '',
+    assetView: (function () {
+      try {
+        var v = localStorage.getItem('gear-ledger-asset-view');
+        return (v === 'text' || v === 'grid') ? v : 'list';
+      } catch (e) { return 'list'; }
+    })(),
     gearCat: '全部',
     gearQ: '',
     gearBrand: '全部',
@@ -359,6 +365,48 @@
     el.classList.toggle('hidden', closed || !hasDemo);
   }
 
+  /* ---------- 资产的三种视图 ---------- */
+  function assetRowHtml(it, c, badge, sub) {
+    return '<article class="asset" data-id="' + it.id + '">' +
+      '<div class="a-icon" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
+      '<div class="a-body">' +
+        '<div class="a-line1">' +
+          '<div class="a-name">' + esc(it.name) + badge + '</div>' +
+          '<div class="a-days' + (c.overdue ? ' over' : '') + '">' + c.days + '<small>天</small></div>' +
+        '</div>' +
+        '<div class="a-line2">' +
+          ((Number(it.qty) || 1) > 1 ? '<span class="a-qty">×' + it.qty + '</span>' : '') +
+          '<span class="a-price">¥' + money(c.net) + '</span>' +
+          '<span class="a-daily">¥' + money(c.daily) + '<small>/天</small></span>' +
+        '</div>' + sub +
+      '</div>' +
+    '</article>';
+  }
+
+  function assetCardHtml(it, c, badge) {
+    var q = Number(it.qty) || 1;
+    return '<article class="acard" data-id="' + it.id + '">' +
+      '<div class="acard-top" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
+      '<div class="acard-body">' +
+        '<div class="acard-name">' + esc(it.name) + badge + '</div>' +
+        '<div class="acard-money"><b>¥' + money(c.net) + '</b>' +
+          (q > 1 ? '<span>×' + q + '</span>' : '') +
+          '<span>¥' + money(c.daily) + '/天</span></div>' +
+        '<div class="acard-days' + (c.overdue ? ' over' : '') + '">' + c.days + ' 天</div>' +
+      '</div>' +
+    '</article>';
+  }
+
+  function assetTextHtml(it, c, badge) {
+    var q = Number(it.qty) || 1;
+    return '<div class="aitem" data-id="' + it.id + '">' +
+      '<span class="at-name">' + esc(it.name) + badge + '</span>' +
+      '<span class="at-days' + (c.overdue ? ' over' : '') + '">' + c.days + '天</span>' +
+      '<span class="at-price">' + (q > 1 ? '×' + q + ' · ' : '') + '¥' + money(c.net) + '</span>' +
+      '<span class="at-daily">¥' + money(c.daily) + '/天</span>' +
+    '</div>';
+  }
+
   function renderAssets() {
     renderTopbar();
     renderCatChips();
@@ -366,8 +414,11 @@
 
     var list = filteredItems();
     var sumTotal = 0, sumDaily = 0, sumCount = 0;
+    var view = state.assetView;
+    var box = $('#asset-list');
+    box.className = 'asset-box view-' + view;
 
-    $('#asset-list').innerHTML = list.map(function (it) {
+    box.innerHTML = list.map(function (it) {
       var c = calc(it);
       sumTotal += c.net;
       sumDaily += c.daily;
@@ -385,21 +436,15 @@
               ' · 已用 ' + c.used + ' 次</div>';
       }
 
-      return '<article class="asset" data-id="' + it.id + '">' +
-        '<div class="a-icon" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
-        '<div class="a-body">' +
-          '<div class="a-line1">' +
-            '<div class="a-name">' + esc(it.name) + badge + '</div>' +
-            '<div class="a-days' + (c.overdue ? ' over' : '') + '">' + c.days + '<small>天</small></div>' +
-          '</div>' +
-          '<div class="a-line2">' +
-            ((Number(it.qty) || 1) > 1 ? '<span class="a-qty">×' + it.qty + '</span>' : '') +
-            '<span class="a-price">¥' + money(c.net) + '</span>' +
-            '<span class="a-daily">¥' + money(c.daily) + '<small>/天</small></span>' +
-          '</div>' + sub +
-        '</div>' +
-      '</article>';
+      if (view === 'grid') return assetCardHtml(it, c, badge);
+      if (view === 'text') return assetTextHtml(it, c, badge);
+      return assetRowHtml(it, c, badge, sub);
     }).join('');
+
+    var vbtns = document.querySelectorAll('#asset-viewswitch [data-aview]');
+    for (var i = 0; i < vbtns.length; i++) {
+      vbtns[i].classList.toggle('on', vbtns[i].getAttribute('data-aview') === view);
+    }
 
     $('#asset-empty').classList.toggle('hidden', list.length > 0);
     $('#sum-total').textContent = money(sumTotal);
@@ -1433,8 +1478,17 @@
       return;
     }
 
+    // 资产视图切换：文字 / 宫格 / 列表
+    var aview = el.closest('[data-aview]');
+    if (aview) {
+      state.assetView = aview.getAttribute('data-aview');
+      try { localStorage.setItem('gear-ledger-asset-view', state.assetView); } catch (e) {}
+      renderAssets();
+      return;
+    }
+
     // 资产卡片
-    var asset = el.closest('.asset');
+    var asset = el.closest('.asset, .acard, .aitem');
     if (asset) { openDetail(asset.getAttribute('data-id')); return; }
 
     // 收藏（必须先于卡片打开判断）
