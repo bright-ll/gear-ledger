@@ -73,3 +73,5 @@
 - 📱 PWA 化，添加到主屏幕
 
 > 装备库里的内容是示例数据，可在 ⚙ 里清空后录入自己的，或直接改 `app.js` 里的 `seedGear()`。
+>
+> 图标：Tabler Icons（https://github.com/tabler/tabler-icons，MIT License）。

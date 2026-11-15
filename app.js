@@ -39,11 +39,6 @@
     '户外': '行进', '睡眠': '睡眠', '背负': '背负', '鞋靴': '鞋袜',
     '照明': '行进', '炊具': '饮食', '其他': '行进'
   };
-  var ICONS = ['🎒','🧥','👟','🥾','⛺','🛌','🔦','🧭','🍳','💧','🧦','🧤','🧢','🕶','⌚',
-               '🔋','📱','💻','🎧','📷','🔌','💡','🖥','⌨️','🖱',
-               '🪑','🛋','🛏','🗄','🚪','🏠','🧺','🧽','🧴','🪥',
-               '📦','🏺','🎁','📚','✏️','🪣','🔧','🪛','🚲','🎿'];
-
   /* ---------- 工具 ---------- */
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -66,6 +61,20 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
     });
+  }
+
+  /* 图标：内置 SVG 图标 id、上传的图片（data URL）或旧版 emoji 都兼容 */
+  function isImgIcon(v) { return typeof v === 'string' && v.indexOf('data:image/') === 0; }
+  function svgIcon(v) { return (window.GL_ICONS && typeof v === 'string') ? window.GL_ICONS[v] : ''; }
+  function iconMarkup(v) {
+    if (isImgIcon(v)) return '<img class="ico-img" src="' + esc(v) + '" alt="">';
+    var s = svgIcon(v);
+    if (s) return '<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true">' + s + '</svg>';
+    return esc(v || '📦');
+  }
+  function emojiIcon(v, cat) {
+    if (typeof v === 'string' && v && !isImgIcon(v) && !svgIcon(v)) return v;
+    return catIcon(cat);
   }
   function group(n, dropZero) {
     var s = (Number(n) || 0).toFixed(2);
@@ -128,7 +137,8 @@
     try {
       localStorage.setItem(LS, JSON.stringify({ items: DB.items, gear: DB.gear }));
     } catch (e) {
-      toast('本地存储不可用，刷新后会丢失');
+      var quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e.message)));
+      toast(quota ? '本地空间不够了，删掉几张照片再试' : '本地存储不可用，刷新后会丢失');
     }
     if (window.Cloud && Cloud.enabled() && Cloud.isReady()) {
       Cloud.scheduleSync(DB);
@@ -354,8 +364,78 @@
     editingGearId: null,
     editingCatalogId: null,
     formIcon: '📦',
-    gearFormIcon: '📦'
+    formIconImg: null,
+    formPhoto: null,
+    gearFormIcon: '📦',
+    gearFormIconImg: null,
+    gearFormPhoto: null
   };
+
+  /* ---------- 编辑器：图标与照片 ---------- */
+  function formIconValue(kind) {
+    return kind === 'gear'
+      ? (state.gearFormIconImg || state.gearFormIcon)
+      : (state.formIconImg || state.formIcon);
+  }
+  function renderFormIcon(kind) {
+    var gear = kind === 'gear';
+    var preview = $(gear ? '#gicon-preview' : '#icon-preview');
+    if (preview) preview.innerHTML = iconMarkup(formIconValue(kind)) + ' <small>选择</small>';
+    markIconPicker(kind);
+  }
+  function markIconPicker(kind) {
+    var gear = kind === 'gear';
+    var box = $(gear ? '#gicon-picker' : '#icon-picker');
+    if (!box) return;
+    var val = gear ? state.gearFormIcon : state.formIcon;
+    var img = gear ? state.gearFormIconImg : state.formIconImg;
+    $$(gear ? '[data-gicon]' : '[data-icon]', box).forEach(function (b) {
+      b.classList.toggle('on', !img && b.getAttribute(gear ? 'data-gicon' : 'data-icon') === val);
+    });
+    var clear = $('.icon-clear', box);
+    if (clear) clear.classList.toggle('hidden', !img);
+  }
+  function setFormIconImg(kind, url) {
+    if (kind === 'gear') state.gearFormIconImg = url || null;
+    else state.formIconImg = url || null;
+    renderFormIcon(kind);
+  }
+  function renderFormPhoto(kind) {
+    var gear = kind === 'gear';
+    var src = gear ? state.gearFormPhoto : state.formPhoto;
+    var img = $(gear ? '#gphoto-img' : '#photo-img');
+    var empty = $(gear ? '#gphoto-empty' : '#photo-empty');
+    var rm = $(gear ? '#gphoto-remove' : '#photo-remove');
+    if (!img || !empty || !rm) return;
+    if (src) {
+      img.src = src;
+      img.classList.remove('hidden');
+      empty.classList.add('hidden');
+      rm.classList.remove('hidden');
+    } else {
+      img.removeAttribute('src');
+      img.classList.add('hidden');
+      empty.classList.remove('hidden');
+      rm.classList.add('hidden');
+    }
+  }
+  function buildIconPicker(box, attr) {
+    if (!box || !window.GL_ICONS || !window.GL_ICON_GROUPS) return;
+    var html = '<div class="icon-src">' +
+      '<button type="button" class="icon-src-btn" data-icon-src="album" data-icon-for="' + attr + '">相册</button>' +
+      '<button type="button" class="icon-src-btn" data-icon-src="camera" data-icon-for="' + attr + '">拍照</button>' +
+      '<button type="button" class="text-btn danger icon-clear hidden" data-icon-src="clear" data-icon-for="' + attr + '">清除图片</button>' +
+      '</div><p class="icon-src-tip">用内置图标，或从相册选一张、拍一张当图标。</p>';
+    html += window.GL_ICON_GROUPS.map(function (grp) {
+      return '<div class="icon-group"><div class="icon-group-t">' + esc(grp.name) + '</div><div class="icon-grid">' +
+        grp.ids.map(function (id) {
+          if (!window.GL_ICONS[id]) return '';
+          return '<button type="button" data-' + attr + '="' + id + '" title="' + esc(id) + '" aria-label="' + esc(id) + '">' +
+            '<svg viewBox="0 0 24 24" aria-hidden="true">' + window.GL_ICONS[id] + '</svg></button>';
+        }).join('') + '</div></div>';
+    }).join('');
+    box.innerHTML = html;
+  }
 
   /* ---------- 计算 ---------- */
   function lifeDays(it) {
@@ -566,6 +646,13 @@
   function renderDemoTip() {
     var el = $('#demo-tip');
     if (!el) return;
+    var phoneLayout = window.matchMedia && window.matchMedia('(max-width: 699px)').matches;
+    var tipText = el.querySelector('div');
+    if (tipText) {
+      tipText.textContent = phoneLayout
+        ? '下方是示例数据。点任意一条进去看看，或点右下角的「＋」记下自己的第一件。'
+        : '下方是示例数据。点任意一条进去看看，或点「新增」记下自己的第一件。';
+    }
     var closed = false;
     try { closed = localStorage.getItem(DEMO_TIP_KEY) === '1'; } catch (e) {}
     var hasDemo = DB.items.some(function (x) { return x.demo && !x.deleted; });
@@ -575,7 +662,7 @@
   /* ---------- 资产的三种视图 ---------- */
   function assetRowHtml(it, c, badge, sub) {
     return '<article class="asset" data-id="' + it.id + '">' +
-      '<div class="a-icon" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
+      '<div class="a-icon" style="background:' + iconBg(it.cat) + '">' + iconMarkup(it.iconImg || it.icon) + '</div>' +
       '<div class="a-body">' +
         '<div class="a-line1">' +
           '<div class="a-name">' + esc(it.name) + badge + '</div>' +
@@ -593,7 +680,10 @@
   function assetCardHtml(it, c, badge) {
     var q = Number(it.qty) || 1;
     return '<article class="acard" data-id="' + it.id + '">' +
-      '<div class="acard-top" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
+      '<div class="acard-top' + (it.photo ? ' has-photo' : '') + '" style="background:' + iconBg(it.cat) + '">' +
+        (it.photo ? '<img class="acard-photo" src="' + esc(it.photo) + '" alt="">' : '') +
+        '<span class="acard-ico">' + iconMarkup(it.iconImg || it.icon) + '</span>' +
+      '</div>' +
       '<div class="acard-body">' +
         '<div class="acard-name">' + esc(it.name) + badge + '</div>' +
         '<div class="acard-money"><b>' + CUR +  money(c.net) + '</b>' +
@@ -654,10 +744,11 @@
     }
 
     var isFiltered = state.cat !== '全部分类' || state.status !== '全部' || !!state.q.trim();
+    var phoneLayout = window.matchMedia && window.matchMedia('(max-width: 699px)').matches;
     $('#asset-empty-title').textContent = isFiltered ? '这个筛选下没有物品' : '还没有记录';
     $('#asset-empty-sub').textContent = isFiltered
       ? '换个分类或状态，也可以点下面回到全部'
-      : '点下面的「新增」，把第一件东西记下来';
+      : (phoneLayout ? '点右下角的「＋」，把第一件东西记下来' : '点下面的「新增」，把第一件东西记下来');
     $('#asset-empty-reset').classList.toggle('hidden', !isFiltered);
     $('#asset-empty').classList.toggle('hidden', list.length > 0);
     $('#sum-total').textContent = money(sumTotal);
@@ -754,7 +845,8 @@
       : '';
 
     $('#detail-body').innerHTML =
-      '<div class="detail-icon" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
+      (it.photo ? '<div class="detail-photo"><img src="' + esc(it.photo) + '" alt="' + esc(it.name) + '"></div>' : '') +
+      '<div class="detail-icon" style="background:' + iconBg(it.cat) + '">' + iconMarkup(it.iconImg || it.icon) + '</div>' +
       '<div class="detail-card"><div class="detail-grid">' + grid + '</div></div>' +
       '<div class="detail-card"><div class="detail-grid">' + grid2 + '</div></div>' +
       useBlock + gearBlock + unlinkBlock + noteBlock + '<div style="height:8px"></div>';
@@ -770,9 +862,12 @@
     state.editingId = item ? item.id : null;
     state.editingCatalogId = (item && item.catalogId) || (preset && preset.catalogId) || null;
     state.formIcon = (item && item.icon) || (preset && preset.icon) || '📦';
+    state.formIconImg = (item && item.iconImg) || (preset && preset.iconImg) || null;
+    state.formPhoto = (item && item.photo) || (preset && preset.photo) || null;
 
     $('#editor-title').textContent = item ? '编辑' : '新增';
-    $('#icon-preview').innerHTML = state.formIcon + ' <small>选择</small>';
+    renderFormIcon('asset');
+    renderFormPhoto('asset');
     $('#icon-picker').classList.add('hidden');
 
     var d = item || preset || {};
@@ -835,6 +930,8 @@
     g.weight = Number(item.weight) || 0;
     g.refPrice = Number(item.officialPrice) || 0;
     if (item.icon) g.icon = item.icon;
+    g.iconImg = item.iconImg || null;
+    g.photo = item.photo || null;
     g.updatedAt = Date.now();
   }
 
@@ -847,6 +944,8 @@
     it.weight = Number(gear.weight) || 0;
     it.officialPrice = Number(gear.refPrice) || 0;
     if (gear.icon) it.icon = gear.icon;
+    it.iconImg = gear.iconImg || null;
+    it.photo = gear.photo || null;
     it.updatedAt = Date.now();
   }
 
@@ -870,6 +969,8 @@
       weight: Number(el.weight.value) || 0,
       officialPrice: Number(el.officialPrice.value) || 0,
       icon: state.formIcon,
+      iconImg: state.formIconImg || null,
+      photo: state.formPhoto || null,
       purchaseDate: el.purchaseDate.value,
       price: Number(el.price.value) || 0,
       qty: Number(el.qty.value) || 1,
@@ -969,8 +1070,9 @@
     var oc = own ? calc(own) : null;
     var w = fmtWeight(gearWeight(g));
     return '<article class="card" data-gid="' + g.id + '">' +
-      '<div class="card-media" style="background:' + iconBg(mapGearCat(g)) + '" data-open="' + g.id + '">' +
-        '<span class="card-emoji">' + esc(g.icon || '📦') + '</span>' +
+      '<div class="card-media' + (g.photo ? ' has-photo' : '') + '" style="background:' + iconBg(mapGearCat(g)) + '" data-open="' + g.id + '">' +
+        (g.photo ? '<img class="card-photo" src="' + esc(g.photo) + '" alt="">' : '') +
+        '<span class="card-emoji">' + iconMarkup(g.iconImg || g.icon) + '</span>' +
         '<button class="heart ' + (g.fav ? 'on' : '') + '" data-fav="' + g.id + '">' + (g.fav ? '♥' : '♡') + '</button>' +
         (own ? '<span class="own-badge">已在资产</span>' : '') +
       '</div>' +
@@ -1001,7 +1103,7 @@
   function gearListHtml(g) {
     var w = fmtWeight(gearWeight(g));
     return '<div class="g-list" data-open="' + g.id + '">' +
-      '<span class="gl-ico" style="background:' + iconBg(mapGearCat(g)) + '">' + esc(g.icon || '📦') + '</span>' +
+      '<span class="gl-ico" style="background:' + iconBg(mapGearCat(g)) + '">' + iconMarkup(g.iconImg || g.icon) + '</span>' +
       '<span class="gl-main"><b>' + esc(g.name) + '</b><small>' + esc(gearMeta(g)) + '</small></span>' +
       '<span class="gl-side"><b>' + CUR +  money2(gearPrice(g)) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
     '</div>';
@@ -1173,6 +1275,7 @@
 
     $('#gdetail-body').innerHTML =
       '<div class="g-hero">' +
+        (g.photo ? '<img class="g-photo" src="' + esc(g.photo) + '" alt="' + esc(g.name) + '">' : '') +
         (gcat ? '<div class="g-cat">' + esc(gcat) + '</div>' : '') +
         '<h2 class="g-name">' + esc(g.name) + '</h2>' +
         '<div class="g-price">' + CUR +  money2(gearPrice(g)) + '<small>' + (own ? '实付价' : '参考价') + '</small></div>' +
@@ -1222,9 +1325,12 @@
     var f = $('#geditor-form');
     state.editingGearId = gear ? gear.id : null;
     state.gearFormIcon = (gear && gear.icon) || '📦';
+    state.gearFormIconImg = (gear && gear.iconImg) || null;
+    state.gearFormPhoto = (gear && gear.photo) || null;
 
     $('#geditor-title').textContent = gear ? '编辑装备' : '新增装备';
-    $('#gicon-preview').innerHTML = state.gearFormIcon + ' <small>选择</small>';
+    renderFormIcon('gear');
+    renderFormPhoto('gear');
     $('#gicon-picker').classList.add('hidden');
     $('#btn-gdel').classList.toggle('hidden', !gear);
 
@@ -1262,6 +1368,8 @@
       refPrice: Number(el.refPrice.value) || 0,
       weight: Number(el.weight.value) || 0,
       icon: state.gearFormIcon,
+      iconImg: state.gearFormIconImg || null,
+      photo: state.gearFormPhoto || null,
       fav: el.fav.checked,
       tags: parseTags(el.tags.value),
       specs: parseSpecs(el.specs.value),
@@ -1477,7 +1585,7 @@
       }
       var plan = it.lifeValue + ' ' + (it.lifeUnit || '天');
       return '<div class="st-life-row">' +
-        '<div class="st-life-ic" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
+        '<div class="st-life-ic" style="background:' + iconBg(it.cat) + '">' + iconMarkup(it.iconImg || it.icon) + '</div>' +
         '<div class="st-life-body">' +
           '<div class="st-life-top"><b>' + esc(it.name) + '</b><span class="' + chipCls + '">' + chip + '</span></div>' +
           '<div class="st-life-track"><i class="' + fillCls + '" style="width:' + pct + '%"></i></div>' +
@@ -1984,7 +2092,7 @@
         g.textAlign = 'left';
         g.font = '22px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
         g.fillStyle = '#000';
-        g.fillText(item.icon || catIcon(cat), x + 14, y + 31);
+        g.fillText(emojiIcon(item.icon, cat), x + 14, y + 31);
 
         g.fillStyle = ink;
         g.font = '600 21px ' + POSTER_SANS;
@@ -2106,12 +2214,65 @@
     }
   }
 
-  function pickFile(accept, cb) {
+  function pickFile(accept, cb, capture) {
     var f = document.createElement('input');
     f.type = 'file';
     f.accept = accept;
-    f.onchange = function () { if (f.files[0]) cb(f.files[0]); };
+    if (capture) f.setAttribute('capture', capture);
+    f.style.position = 'fixed';
+    f.style.left = '-9999px';
+    f.onchange = function () {
+      var file = f.files && f.files[0];
+      if (file) cb(file);
+      setTimeout(function () { if (f.parentNode) f.parentNode.removeChild(f); }, 0);
+    };
+    document.body.appendChild(f);
+    var cleanup = function () {
+      setTimeout(function () { if (f.parentNode) f.parentNode.removeChild(f); }, 400);
+      window.removeEventListener('focus', cleanup);
+    };
+    window.addEventListener('focus', cleanup);
     f.click();
+  }
+
+  /* 读取图片并压到合适尺寸，避免把原图塞进本地存储 */
+  function readImageFile(file, maxEdge, quality, cb) {
+    if (!file) return;
+    if (file.type && file.type.indexOf('image/') !== 0) { toast('请选择图片文件'); return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var w = img.width, h = img.height;
+        if (!w || !h) { toast('图片无法读取'); return; }
+        var scale = Math.min(1, maxEdge / Math.max(w, h));
+        var cw = Math.max(1, Math.round(w * scale));
+        var ch = Math.max(1, Math.round(h * scale));
+        var cv = document.createElement('canvas');
+        cv.width = cw; cv.height = ch;
+        var ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.drawImage(img, 0, 0, cw, ch);
+        try { cb(cv.toDataURL('image/jpeg', quality || 0.7)); }
+        catch (e) { toast('图片处理失败，换一张试试'); }
+      };
+      img.onerror = function () { toast('图片无法读取'); };
+      img.src = reader.result;
+    };
+    reader.onerror = function () { toast('图片读取失败'); };
+    reader.readAsDataURL(file);
+  }
+
+  function pickPhoto(kind, camera) {
+    pickFile('image/*', function (file) {
+      readImageFile(file, 520, 0.66, function (url) {
+        if (kind === 'gear') state.gearFormPhoto = url;
+        else state.formPhoto = url;
+        renderFormPhoto(kind);
+        toast('照片已添加');
+      });
+    }, camera ? 'environment' : null);
   }
 
   /* =========================================================
@@ -2130,6 +2291,8 @@
     if (name === 'stats') renderStats();
     if (name === 'assets') renderAssets();
     if (name === 'mine') renderMine();
+    var sb = view ? view.querySelector('.scroll-body') : null;
+    if (sb) sb.scrollTop = 0;
     window.scrollTo(0, 0);
   }
 
@@ -2596,6 +2759,8 @@
           officialPrice: Number(gear.refPrice) || 0,
           price: '',
           icon: gear.icon,
+          iconImg: gear.iconImg || null,
+          photo: gear.photo || null,
           catalogId: gear.id
         });
       }
@@ -2789,28 +2954,55 @@
     // 图标选择
     if (el.closest('#icon-preview')) {
       $('#icon-picker').classList.toggle('hidden');
+      markIconPicker('asset');
       return;
     }
     var ip = el.closest('[data-icon]');
     if (ip) {
       state.formIcon = ip.getAttribute('data-icon');
-      $('#icon-preview').innerHTML = state.formIcon + ' <small>选择</small>';
+      state.formIconImg = null;
+      renderFormIcon('asset');
       $('#icon-picker').classList.add('hidden');
+      return;
+    }
+
+    // 图标来源：相册 / 拍照 / 清除图片
+    var isrc = el.closest('[data-icon-src]');
+    if (isrc) {
+      var iconKind = isrc.getAttribute('data-icon-for') === 'gicon' ? 'gear' : 'asset';
+      var iconAct = isrc.getAttribute('data-icon-src');
+      if (iconAct === 'clear') { setFormIconImg(iconKind, null); return; }
+      pickFile('image/*', function (file) {
+        readImageFile(file, 200, 0.82, function (url) {
+          setFormIconImg(iconKind, url);
+          $(iconKind === 'gear' ? '#gicon-picker' : '#icon-picker').classList.add('hidden');
+        });
+      }, iconAct === 'camera' ? 'environment' : null);
       return;
     }
 
     // 装备图标选择
     if (el.closest('#gicon-preview')) {
       $('#gicon-picker').classList.toggle('hidden');
+      markIconPicker('gear');
       return;
     }
     var gip = el.closest('[data-gicon]');
     if (gip) {
       state.gearFormIcon = gip.getAttribute('data-gicon');
-      $('#gicon-preview').innerHTML = state.gearFormIcon + ' <small>选择</small>';
+      state.gearFormIconImg = null;
+      renderFormIcon('gear');
       $('#gicon-picker').classList.add('hidden');
       return;
     }
+
+    // 照片：相册 / 拍照 / 删除
+    if (el.closest('#photo-album')) { pickPhoto('asset', false); return; }
+    if (el.closest('#photo-camera')) { pickPhoto('asset', true); return; }
+    if (el.closest('#photo-remove')) { state.formPhoto = null; renderFormPhoto('asset'); return; }
+    if (el.closest('#gphoto-album')) { pickPhoto('gear', false); return; }
+    if (el.closest('#gphoto-camera')) { pickPhoto('gear', true); return; }
+    if (el.closest('#gphoto-remove')) { state.gearFormPhoto = null; renderFormPhoto('gear'); return; }
 
     // 搜索开合
     if (el.closest('#btn-search')) {
@@ -2844,6 +3036,7 @@
 
   // 新增
   $('#btn-new').addEventListener('click', function () { openEditor(null, null); });
+  $('#btn-new-fab').addEventListener('click', function () { openEditor(null, null); });
   $('#btn-g-new').addEventListener('click', function () { openGearEditor(null); });
   $('#btn-g-new-top').addEventListener('click', function () { openGearEditor(null); });
 
@@ -2942,17 +3135,13 @@
     return '<option>' + esc(c) + '</option>';
   }).join('');
 
-  $('#icon-picker').innerHTML = ICONS.map(function (ic) {
-    return '<button type="button" data-icon="' + ic + '">' + ic + '</button>';
-  }).join('');
+  buildIconPicker($('#icon-picker'), 'icon');
 
   $('#geditor-cat').innerHTML = GEAR_CATS.map(function (c) {
     return '<option>' + c + '</option>';
   }).join('');
 
-  $('#gicon-picker').innerHTML = ICONS.map(function (ic) {
-    return '<button type="button" data-gicon="' + ic + '">' + ic + '</button>';
-  }).join('');
+  buildIconPicker($('#gicon-picker'), 'gicon');
 
   /* 外观与货币 */
   applyTheme();

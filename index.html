@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>我的物品 · 日均成本台账</title>
-<link rel="stylesheet" href="styles.css?v=17">
+<link rel="stylesheet" href="styles.css?v=21">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -79,22 +79,26 @@
     </div>
 
     <div class="demo-tip hidden" id="demo-tip">
-      <div>下方是示例数据。点任意一条进去看看，或点「新增」记下自己的第一件。</div>
+      <div>下方是示例数据。点任意一条进去看看，或点右下角的「＋」记下自己的第一件。</div>
       <button class="text-btn" id="demo-tip-close">知道了</button>
     </div>
 
-    <div id="asset-list" class="asset-box view-list"></div>
+    <div class="scroll-body" id="asset-scroll">
+      <div id="asset-list" class="asset-box view-list"></div>
 
-    <div class="empty hidden" id="asset-empty">
-      <div class="empty-ico">📦</div>
-      <p id="asset-empty-title">还没有记录</p>
-      <span id="asset-empty-sub">点下面的「新增」，把第一件东西记下来</span>
-      <button class="empty-reset hidden" id="asset-empty-reset">看全部物品</button>
+      <div class="empty hidden" id="asset-empty">
+        <div class="empty-ico">📦</div>
+        <p id="asset-empty-title">还没有记录</p>
+        <span id="asset-empty-sub">点右下角的「＋」，把第一件东西记下来</span>
+        <button class="empty-reset hidden" id="asset-empty-reset">看全部物品</button>
+      </div>
+
+      <div class="dock">
+        <button class="btn-main" id="btn-new">新增</button>
+      </div>
     </div>
 
-    <div class="dock">
-      <button class="btn-main" id="btn-new">新增</button>
-    </div>
+    <button class="fab-add" id="btn-new-fab" title="新增" aria-label="新增">+</button>
   </section>
 
   <!-- ================= 装备库 ================= -->
@@ -126,14 +130,16 @@
       <div class="chips scroll-x" id="gear-chips"></div>
       <button class="filter-btn" id="btn-gfilter">筛选<span class="filter-count" id="gfilter-count"></span></button>
     </div>
-    <div class="gear-groups view-grid" id="gear-grid"></div>
-    <div class="empty hidden" id="gear-empty">
-      <div class="empty-ico">🔍</div>
-      <p>没有匹配的装备</p>
-    </div>
-    <div class="note">装备可以点开编辑或删除，也可以新增自己的</div>
-    <div class="dock">
-      <button class="btn-main" id="btn-g-new">新增装备</button>
+    <div class="scroll-body" id="gear-scroll">
+      <div class="gear-groups view-grid" id="gear-grid"></div>
+      <div class="empty hidden" id="gear-empty">
+        <div class="empty-ico">🔍</div>
+        <p>没有匹配的装备</p>
+      </div>
+      <div class="note">装备可以点开编辑或删除，也可以新增自己的</div>
+      <div class="dock">
+        <button class="btn-main" id="btn-g-new">新增装备</button>
+      </div>
     </div>
   </section>
 
@@ -231,6 +237,20 @@
         <label class="row"><span>收藏</span><input type="checkbox" name="fav" class="switch"></label>
       </div>
 
+      <div class="form-section">装备照片（选填）</div>
+      <div class="form-card photo-card">
+        <div class="photo-thumb" id="gphoto-thumb">
+          <img id="gphoto-img" class="hidden" alt="装备照片">
+          <span id="gphoto-empty">还没有照片</span>
+        </div>
+        <div class="photo-actions">
+          <button type="button" class="photo-btn" id="gphoto-album">从相册选择</button>
+          <button type="button" class="photo-btn" id="gphoto-camera">拍一张</button>
+          <button type="button" class="photo-btn danger hidden" id="gphoto-remove">删除</button>
+        </div>
+        <p class="photo-tip">选一张能看清装备样子的照片，详情页和卡片会显示。</p>
+      </div>
+
       <div class="form-section">详细资料（选填）</div>
       <div class="form-card">
         <label class="row col"><span>标签</span>
@@ -291,6 +311,20 @@
       <div class="form-card">
         <label class="row"><span>名称</span><input name="name" required placeholder="输入名称"></label>
         <label class="row"><span>购买时间</span><input type="date" name="purchaseDate" required></label>
+      </div>
+
+      <div class="form-section">物品照片（选填）</div>
+      <div class="form-card photo-card">
+        <div class="photo-thumb" id="photo-thumb">
+          <img id="photo-img" class="hidden" alt="物品照片">
+          <span id="photo-empty">还没有照片</span>
+        </div>
+        <div class="photo-actions">
+          <button type="button" class="photo-btn" id="photo-album">从相册选择</button>
+          <button type="button" class="photo-btn" id="photo-camera">拍一张</button>
+          <button type="button" class="photo-btn danger hidden" id="photo-remove">删除</button>
+        </div>
+        <p class="photo-tip">选一张能看清物品样子的照片，详情页会显示。</p>
       </div>
 
       <div class="form-section">以下为选填项</div>
@@ -461,9 +495,10 @@
 <!-- ================= 通用图标选择 ================= -->
 <div class="toast" id="toast"></div>
 
-<script src="config.js?v=17"></script>
-<script src="cloud.js?v=17"></script>
-<script src="app.js?v=17"></script>
+<script src="config.js?v=21"></script>
+<script src="cloud.js?v=21"></script>
+<script src="icons.js?v=21"></script>
+<script src="app.js?v=21"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {

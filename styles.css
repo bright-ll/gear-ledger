@@ -58,6 +58,9 @@
 [data-theme="dark"] .gl-ico,
 [data-theme="dark"] .detail-icon,
 [data-theme="dark"] .card-media{filter:brightness(.8) saturate(.85)}
+/* 照片区不要压暗，保持原色 */
+[data-theme="dark"] .acard-top.has-photo,
+[data-theme="dark"] .card-media.has-photo{filter:none}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
 body{
@@ -198,9 +201,13 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .asset:active{transform:scale(.988)}
 .a-icon{
   width:52px;height:52px;flex:none;border-radius:14px;
-  display:grid;place-items:center;font-size:27px;
+  display:grid;place-items:center;font-size:27px;overflow:hidden;
   background:linear-gradient(150deg,#f5f6ff,#eceeff);
 }
+.a-icon .ico-svg{width:28px;height:28px}
+.a-icon .ico-img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+/* 图标底色是浅色渐变，线框图标固定用深色，深色模式下也看得清 */
+.a-icon,.acard-top,.detail-icon,.gl-ico,.st-life-ic,.card-media{color:#3b4256}
 .a-body{flex:1;min-width:0}
 .a-line1{display:flex;align-items:flex-start;gap:8px}
 .a-name{
@@ -238,7 +245,12 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 
 /* 宫格卡片 */
 .acard{background:var(--card);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column}
-.acard-top{display:grid;place-items:center;padding:20px 0;font-size:34px}
+.acard-top{position:relative;overflow:hidden;display:grid;place-items:center;padding:20px 0;font-size:34px}
+.acard-top .ico-svg{width:38px;height:38px}
+.acard-top .acard-ico{display:grid;place-items:center}
+.acard-top .ico-img{width:38px;height:38px;object-fit:cover;border-radius:10px}
+.acard-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.acard-top.has-photo .acard-ico{visibility:hidden}
 .acard-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:4px}
 .acard-name{
   font-size:14px;font-weight:800;line-height:1.35;
@@ -278,6 +290,8 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   background:var(--card);color:var(--blue);box-shadow:none;border:1.5px solid var(--blue-soft);
 }
 .btn-main.on{background:linear-gradient(135deg,#34d399,#12a974);box-shadow:0 8px 22px rgba(18,169,116,.26)}
+/* 右下角悬浮新增：只在手机布局显示，桌面沿用底部按钮 */
+.fab-add{display:none}
 /* 详情页：移出资产 */
 .unlink-wrap{padding:14px 14px 0}
 .unlink-wrap .btn-main{display:block;width:100%}
@@ -323,9 +337,15 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 /* ================= 详情页 ================= */
 .detail-icon{
   display:grid;place-items:center;margin:16px auto 0;
-  width:64px;height:64px;border-radius:18px;
+  width:64px;height:64px;border-radius:18px;overflow:hidden;
   background:var(--card);font-size:34px;box-shadow:0 4px 16px rgba(20,22,28,.07);
 }
+.detail-icon .ico-svg{width:38px;height:38px}
+.detail-icon .ico-img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.detail-photo{
+  margin:14px 14px 0;border-radius:16px;overflow:hidden;background:var(--card2);
+}
+.detail-photo img{display:block;width:100%;max-height:280px;object-fit:cover}
 .detail-card{
   margin:14px 14px 0;background:var(--card);border-radius:var(--radius);padding:8px 18px;
 }
@@ -345,9 +365,12 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .pagehead{padding:calc(18px + var(--safe-t)) 18px 0;position:relative}
 .gear-add{
   position:absolute;right:14px;top:calc(14px + var(--safe-t));
-  width:38px;height:38px;background:var(--card);font-size:24px;font-weight:400;
-  box-shadow:0 4px 14px rgba(20,22,28,.10);
+  width:38px;height:38px;
+  background:linear-gradient(135deg,#5b6ef8,#4354f0);
+  color:#fff;font-size:22px;font-weight:400;line-height:1;
+  box-shadow:0 6px 16px rgba(67,84,240,.35);
 }
+.gear-add:active{transform:scale(.93)}
 .kicker{font-size:10px;letter-spacing:.16em;color:var(--muted);font-weight:700}
 .pagehead h1{font-size:26px;font-weight:800;margin:3px 0 4px;letter-spacing:-.02em}
 .pagehead .sub{margin:0;color:var(--sub);font-size:13px}
@@ -409,6 +432,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 
 /* 装备库宫格：压扁卡片，一屏多看好几组 */
 #gear-grid .card-media{aspect-ratio:auto;height:84px}
+#gear-grid .card-media .ico-img{width:32px;height:32px}
 #gear-grid .card-emoji{font-size:32px}
 #gear-grid .card-body{padding:7px 10px 9px;gap:4px}
 #gear-grid .card-name{-webkit-line-clamp:1;min-height:0;font-size:14px;line-height:1.3}
@@ -437,9 +461,11 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 }
 .g-list:active{transform:scale(.99)}
 .gl-ico{
-  width:44px;height:44px;flex:none;border-radius:12px;
+  width:44px;height:44px;flex:none;border-radius:12px;overflow:hidden;
   display:grid;place-items:center;font-size:22px;
 }
+.gl-ico .ico-svg{width:24px;height:24px}
+.gl-ico .ico-img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
 .gl-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .gl-main b{font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gl-main small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -465,9 +491,13 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   display:flex;flex-direction:column;
 }
 .card-media{
-  position:relative;aspect-ratio:1/.72;display:grid;place-items:center;
+  position:relative;overflow:hidden;aspect-ratio:1/.72;display:grid;place-items:center;
   background:linear-gradient(150deg,#f7f8fc,#eef0f8);cursor:pointer;
 }
+.card-media .ico-svg{width:40px;height:40px}
+.card-media .ico-img{width:40px;height:40px;object-fit:cover;border-radius:10px}
+.card-media.has-photo .card-emoji{visibility:hidden}
+.card-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .card-emoji{font-size:40px;filter:drop-shadow(0 6px 10px rgba(20,22,28,.10))}
 .heart{
   position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;
@@ -584,17 +614,45 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   display:flex;align-items:center;gap:6px;font-size:22px;
   background:var(--card2);border-radius:10px;padding:5px 12px;
 }
+.icon-preview .ico-svg{width:22px;height:22px}
+.icon-preview .ico-img{width:26px;height:26px;object-fit:cover;border-radius:7px}
 .icon-preview small{font-size:12px;color:var(--sub);font-weight:500}
 .icon-picker{
-  display:grid;grid-template-columns:repeat(7,1fr);gap:6px;
-  padding:12px 18px 16px;border-bottom:1px solid var(--line2);
-  max-height:220px;overflow-y:auto;
+  padding:10px 14px 14px;border-bottom:1px solid var(--line2);
+  max-height:290px;overflow-y:auto;overscroll-behavior:contain;
 }
-.icon-picker button{
-  aspect-ratio:1;border-radius:10px;background:var(--card2);font-size:21px;
+.icon-src{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:2px 2px 0}
+.icon-src-btn{
+  font-size:12.5px;font-weight:600;color:var(--blue);background:var(--blue-soft);
+  border-radius:9px;padding:7px 12px;
+}
+.icon-clear{font-size:12.5px;padding:6px 8px;margin-left:auto}
+.icon-src-tip{font-size:11px;color:var(--muted);margin:7px 2px 0;line-height:1.5}
+.icon-group{margin-top:12px}
+.icon-group-t{font-size:11px;color:var(--sub);font-weight:700;padding:0 2px 7px}
+.icon-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.icon-grid button{
+  aspect-ratio:1;border-radius:10px;background:var(--card2);color:var(--sub);
   display:grid;place-items:center;
 }
-.icon-picker button.on{background:var(--blue-soft);box-shadow:inset 0 0 0 2px var(--blue)}
+.icon-grid button svg{width:21px;height:21px}
+.icon-grid button.on{background:var(--blue-soft);color:var(--blue);box-shadow:inset 0 0 0 2px var(--blue)}
+
+/* 照片：新增/编辑里的预览与按钮 */
+.photo-card{padding:12px 14px 14px}
+.photo-thumb{
+  position:relative;border-radius:14px;overflow:hidden;background:var(--card2);
+  min-height:150px;display:grid;place-items:center;color:var(--muted);font-size:12.5px;
+}
+.photo-thumb img{display:block;width:100%;max-height:240px;object-fit:cover}
+.photo-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.photo-btn{
+  flex:1;min-width:88px;padding:9px 10px;border-radius:10px;
+  background:var(--card2);color:var(--sub);font-size:13px;font-weight:600;
+}
+.photo-btn.danger{color:var(--red);flex:0 0 auto;min-width:0;padding:9px 12px}
+.photo-tip{font-size:11px;color:var(--muted);margin:8px 2px 0;line-height:1.5}
+.g-photo{display:block;width:100%;max-height:260px;object-fit:cover;border-radius:12px;margin:0 0 14px}
 
 /* ================= 分析 ================= */
 .panel{background:var(--card);border-radius:var(--radius);padding:16px 18px}
@@ -609,22 +667,22 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .cc5{--cc:var(--ch6)}
 .cc6{--cc:var(--ch7)}
 
-/* 蓝色总览卡 */
+/* 蓝色总览卡：尺寸对齐资产页顶部卡片 */
 .st-hero{
-  position:relative;overflow:hidden;padding:18px 18px 16px;border-radius:18px;
+  position:relative;overflow:hidden;padding:14px 16px 14px;border-radius:18px;
   background:linear-gradient(135deg,#5b6ef8 0%,#4a5cf3 45%,#3f4fe8 100%);
   color:#fff;box-shadow:0 8px 24px rgba(67,84,240,.28);
 }
 [data-theme="dark"] .st-hero{background:linear-gradient(135deg,#2b3ac0,#4a5ae8)}
 .st-hero-blob{position:absolute;right:-46px;top:-62px;width:190px;height:190px;border-radius:50%;background:rgba(255,255,255,.09);pointer-events:none}
 .st-hero-blob::after{content:"";position:absolute;left:-72px;top:104px;width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,.06)}
-.st-hero-top{position:relative;display:flex;align-items:center;justify-content:space-between;font-size:12.5px;opacity:.92}
-.st-hero-tag{background:rgba(255,255,255,.18);border-radius:99px;padding:3px 10px;font-size:11px;font-weight:600}
-.st-hero-num{position:relative;font-size:35px;font-weight:800;letter-spacing:-.03em;line-height:1.2;margin-top:7px;font-variant-numeric:tabular-nums}
-.st-hero-num small{font-size:19px;font-weight:700;opacity:.8}
-.st-hero-grid{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;padding-top:13px;border-top:1px solid rgba(255,255,255,.18)}
-.st-hero-grid b{display:block;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.st-hero-grid span{display:block;font-size:10.5px;opacity:.72;margin-top:2px}
+.st-hero-top{position:relative;display:flex;align-items:center;justify-content:space-between;font-size:12px;opacity:.92}
+.st-hero-tag{background:rgba(255,255,255,.18);border-radius:99px;padding:2px 8px;font-size:10px;font-weight:600}
+.st-hero-num{position:relative;font-size:22px;font-weight:800;letter-spacing:-.03em;line-height:1.15;margin-top:2px;font-variant-numeric:tabular-nums}
+.st-hero-num small{font-size:13px;font-weight:700;opacity:.8}
+.st-hero-grid{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.18)}
+.st-hero-grid b{display:block;font-size:13.5px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-hero-grid span{display:block;font-size:9.5px;opacity:.72;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* 分类环形图 */
 .st-donut-row{display:flex;align-items:center;gap:4px;margin-top:2px}
@@ -669,7 +727,9 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .st-life-row{display:flex;gap:10px;padding:11px 0;border-bottom:1px solid var(--line2)}
 .st-head + .st-life-row{padding-top:8px}
 .st-life-row:last-of-type{border-bottom:0;padding-bottom:2px}
-.st-life-ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:15px;flex:none;line-height:1}
+.st-life-ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:15px;flex:none;line-height:1;overflow:hidden}
+.st-life-ic .ico-svg{width:18px;height:18px}
+.st-life-ic .ico-img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
 [data-theme="dark"] .st-life-ic{filter:brightness(.8) saturate(.85)}
 .st-life-body{flex:1;min-width:0}
 .st-life-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -748,6 +808,45 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 }
 
 /* =========================================================
+   手机：资产 / 装备库顶部固定，只有筛选下面列表区滚动
+   ========================================================= */
+@media(max-width:699px){
+  .app{min-height:100vh;min-height:100dvh}
+  #view-assets,
+  #view-gear{
+    display:flex;flex-direction:column;
+    height:calc(100vh - 72px - var(--safe-b));
+    height:calc(100dvh - 72px - var(--safe-b));
+    overflow:hidden;
+  }
+  .scroll-body{
+    flex:1 1 auto;min-height:0;
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+    overscroll-behavior-y:contain;
+    scrollbar-width:none;
+  }
+  .scroll-body::-webkit-scrollbar{display:none}
+  .scroll-body .dock{padding-bottom:12px}
+
+  /* 资产页：右下角常驻新增按钮，长列表不用滑到底 */
+  #view-assets .dock{display:none}
+  #asset-scroll{padding-bottom:78px}
+  .fab-add{
+    position:fixed;z-index:45;
+    right:max(16px, calc(50vw - 264px));
+    bottom:calc(88px + var(--safe-b));
+    width:38px;height:38px;border-radius:50%;
+    display:grid;place-items:center;
+    background:linear-gradient(135deg,#5b6ef8,#4354f0);
+    color:#fff;font-size:22px;font-weight:400;line-height:1;
+    box-shadow:0 6px 16px rgba(67,84,240,.35);
+    transition:transform .15s;
+  }
+  .fab-add:active{transform:scale(.93)}
+  [data-theme="dark"] .fab-add{box-shadow:0 6px 16px rgba(20,28,120,.5)}
+}
+
+/* =========================================================
    响应式：iPad / 笔记本
    手机（<700）保持上面的单列布局，以下只做加宽与分栏
    ========================================================= */
@@ -820,23 +919,24 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   #view-assets > .asset-tools{grid-area:chips;padding:18px 0 4px}
   #view-assets > .searchbox{grid-area:search;margin:10px 0 0}
   #view-assets > .demo-tip{grid-area:tip;margin:10px 0 0}
-  #view-assets > .asset-box{grid-area:list;padding:12px 0 0}
+  #view-assets .scroll-body{display:contents}
+  #view-assets .scroll-body .asset-box{grid-area:list;padding:12px 0 0}
   #view-assets .asset-box.view-grid{grid-template-columns:repeat(3,1fr)}
-  #view-assets > .empty{grid-area:empty}
-  #view-assets > .dock{grid-area:dock}
+  #view-assets .scroll-body .empty{grid-area:empty}
+  #view-assets .scroll-body .dock{grid-area:dock}
 
   /* 装备库 / 分析 / 我的：限制阅读宽度 */
   #view-gear,#view-stats,#view-mine{max-width:1000px;margin:0 auto}
   #view-gear .grid,#view-gear .view-grid .gg-body{grid-template-columns:repeat(4,1fr)}
 
   /* 主按钮：通栏 → 右对齐胶囊 */
-  #view-assets > .dock,
-  #view-gear > .dock{
+  #view-assets .scroll-body .dock,
+  #view-gear .scroll-body .dock{
     background:none;padding:16px 0 8px;
     display:flex;justify-content:flex-end;
   }
-  #view-assets > .dock .btn-main,
-  #view-gear > .dock .btn-main{
+  #view-assets .scroll-body .dock .btn-main,
+  #view-gear .scroll-body .dock .btn-main{
     width:auto;min-width:200px;padding:14px 34px;border-radius:999px;
   }
 }
