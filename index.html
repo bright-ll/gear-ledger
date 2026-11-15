@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>我的物品 · 日均成本台账</title>
-<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="styles.css?v=7">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -347,33 +347,64 @@
 
 <!-- ================= 生成装备图片 ================= -->
 <div class="sheet" id="poster-sheet">
-  <div class="sheet-panel sheet-mid">
+  <div class="sheet-panel">
     <div class="sheet-head">
       <button class="icon-btn" data-close>‹</button>
       <strong>生成装备图片</strong>
-      <button class="text-btn" id="poster-save">保存</button>
+      <span style="width:44px"></span>
     </div>
     <div class="sheet-scroll poster-scroll">
-      <div class="poster-stage"><canvas id="poster-canvas" width="750" height="1000"></canvas></div>
-      <div class="poster-form">
-        <label class="poster-row"><span>装备</span><select id="poster-gear"></select></label>
-        <label class="poster-row"><span>海报标题</span><input id="poster-title" value="我的装备库" maxlength="16" placeholder="我的装备库"></label>
-        <label class="poster-row"><span>样式</span>
-          <select id="poster-style">
-            <option value="card">卡片</option>
-            <option value="minimal">极简</option>
-          </select>
-        </label>
-        <div class="poster-row col"><span>背景</span><div class="poster-bgs" id="poster-bgs"></div></div>
-        <div class="poster-row col"><span>展示内容</span>
-          <div class="poster-checks" id="poster-checks">
-            <label><input type="checkbox" value="brand" checked> 品牌</label>
-            <label><input type="checkbox" value="price" checked> 参考价</label>
-            <label><input type="checkbox" value="tags" checked> 标签</label>
-            <label><input type="checkbox" value="specs"> 参数</label>
-          </div>
-        </div>
-      </div>
+      <p class="ps-sub">选好方案和样式，生成可分享的装备图</p>
+
+      <div class="ps-sec"><span>📦</span>装备方案</div>
+      <div class="ps-plans" id="poster-plans"></div>
+      <p class="ps-tip">左右滑动看全部方案；选中后图片只包含这套装备。</p>
+
+      <div class="ps-sec"><span>🖼️</span>图片样式</div>
+      <div class="ps-styles" id="poster-styles"></div>
+
+      <div class="ps-sec"><span>👁️</span>展示内容</div>
+      <div class="ps-seg" id="poster-content"></div>
+      <p class="ps-tip">选择图片上展示重量、价格或两者；默认两者都展示。</p>
+
+      <div class="ps-sec"><span>🏷️</span>海报名称</div>
+      <input class="ps-input" id="poster-title" maxlength="16" placeholder="个人装备清单">
+      <p class="ps-tip">显示在生成图片顶部；选择装备方案会自动带入名称，可再修改。</p>
+
+      <div class="ps-sec"><span>🎨</span>图片背景</div>
+      <button class="ps-bg" id="poster-bg-pick">
+        <canvas id="poster-bg-thumb" width="96" height="72"></canvas>
+        <span class="ps-bg-main">
+          <b id="poster-bg-name">默认山脉</b>
+          <small>打开图库选择或添加图片</small>
+        </span>
+        <span class="ps-bg-chev">›</span>
+      </button>
+      <button class="ps-bg-reset hidden" id="poster-bg-reset">恢复默认山脉</button>
+      <input type="file" id="poster-bg-file" accept="image/*" class="hidden">
+    </div>
+    <div class="dock ps-dock">
+      <button class="btn-main ghost" id="poster-cancel">取消</button>
+      <button class="btn-main poster-gen" id="poster-gen">生成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 装备图片预览 ================= -->
+<div class="sheet" id="poster-view-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <span style="width:44px"></span>
+      <strong>装备图片</strong>
+      <button class="text-btn" data-close>关闭</button>
+    </div>
+    <div class="sheet-scroll poster-view-scroll">
+      <p class="ps-tip center">上下滑动查看，点击图片可放大</p>
+      <img id="poster-result-img" class="poster-result" alt="装备图片">
+    </div>
+    <div class="dock ps-dock">
+      <button class="btn-main ghost" data-close>取消</button>
+      <button class="btn-main" id="poster-save">保存到相册</button>
     </div>
   </div>
 </div>
@@ -398,9 +429,9 @@
 <!-- ================= 通用图标选择 ================= -->
 <div class="toast" id="toast"></div>
 
-<script src="config.js?v=6"></script>
-<script src="cloud.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="cloud.js?v=7"></script>
+<script src="app.js?v=7"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {

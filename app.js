@@ -413,15 +413,19 @@
       if (e.pointerType !== 'mouse' || e.button !== 0) return;
       down = true; moved = false;
       startX = e.clientX; startLeft = box.scrollLeft;
-      try { box.setPointerCapture(e.pointerId); } catch (err) {}
+      /* 注意：这里不能 setPointerCapture，否则 click 的目标会变成整个筛选条，
+         里面的分类按钮就点不动了。只有真正拖起来才捕获。 */
     });
 
     box.addEventListener('pointermove', function (e) {
       if (!down) return;
       var dx = e.clientX - startX;
       if (!moved && Math.abs(dx) < 8) return;
-      moved = true;
-      box.classList.add('dragging');
+      if (!moved) {
+        moved = true;
+        try { box.setPointerCapture(e.pointerId); } catch (err) {}
+        box.classList.add('dragging');
+      }
       box.scrollLeft = startLeft - dx;
     });
 
@@ -1365,46 +1369,106 @@
   }
 
   /* ---------- 生成装备图片 ---------- */
-  var POSTER_BGS = [
-    { name: '蓝紫', from: '#4354f0', to: '#7c8bff', ink: '#ffffff', soft: 'rgba(255,255,255,.16)' },
-    { name: '夜幕', from: '#15171d', to: '#303646', ink: '#ffffff', soft: 'rgba(255,255,255,.10)' },
-    { name: '暖橙', from: '#e8602f', to: '#ffb27a', ink: '#ffffff', soft: 'rgba(255,255,255,.18)' },
-    { name: '墨绿', from: '#0d4630', to: '#2f8f5b', ink: '#ffffff', soft: 'rgba(255,255,255,.14)' },
-    { name: '米白', from: '#f3ecdf', to: '#dfd3bd', ink: '#3a3327', soft: 'rgba(58,51,39,.08)' }
+  var POSTER_STYLES = [
+    { id: 'list', name: '装备清单版', desc: '经典装备图片' },
+    { id: 'wild', name: '山野氛围版', desc: '山野背景图片' },
+    { id: 'birch', name: '装备白桦版', desc: '白底大图，系统分类' }
   ];
-  var poster = { bg: 0, gearId: null };
+  var POSTER_CONTENTS = [
+    { id: 'both', name: '重量+价格' },
+    { id: 'weight', name: '仅重量' },
+    { id: 'price', name: '仅价格' }
+  ];
+  var CAT_COLORS = {
+    '户外': '#4354f0', '睡眠': '#7c5cf0', '背负': '#0e9f6e', '鞋靴': '#e8602f',
+    '照明': '#f5a524', '炊具': '#0ea5e9', '其他': '#8b90a0'
+  };
+  var POSTER_SANS = '"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif';
 
-  function posterGear() {
-    return DB.gear.find(function (g) { return g.id === poster.gearId && !g.deleted; }) || null;
+  var poster = {
+    plan: 'all',
+    style: 'list',
+    content: 'both',
+    title: '个人装备清单',
+    bgImage: null,
+    bgCustom: false,
+    result: ''
+  };
+
+  function posterData() {
+    var list = DB.gear.filter(function (g) { return !g.deleted; });
+    var groups = {}, order = [];
+    list.forEach(function (g) {
+      var k = g.cat || '其他';
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(g);
+    });
+    order.sort(function (a, b) {
+      var ia = GEAR_CATS.indexOf(a), ib = GEAR_CATS.indexOf(b);
+      if (ia < 0) ia = 99;
+      if (ib < 0) ib = 99;
+      return ia - ib;
+    });
+    var totalW = 0, totalP = 0;
+    list.forEach(function (g) {
+      totalW += gearWeight(g);
+      totalP += Number(g.refPrice) || 0;
+    });
+    return { groups: groups, order: order, totalW: totalW, totalP: totalP, count: list.length };
   }
 
   function openPoster() {
-    var list = DB.gear.filter(function (g) { return !g.deleted; });
-    if (!list.length) { toast('装备库还是空的，先加一件装备'); return; }
+    var d = posterData();
+    if (!d.count) { toast('装备库还是空的，先加几件装备'); return; }
 
-    var sel = $('#poster-gear');
-    sel.innerHTML = list.map(function (g) {
-      return '<option value="' + esc(g.id) + '">' + esc(g.name) + '</option>';
-    }).join('');
-    if (!poster.gearId || !list.some(function (g) { return g.id === poster.gearId; })) {
-      poster.gearId = list[0].id;
-    }
-    sel.value = poster.gearId;
+    try {
+      var saved = localStorage.getItem('gearLedger.posterTitle');
+      if (saved) poster.title = saved;
+    } catch (e) {}
 
-    var saved = '';
-    try { saved = localStorage.getItem('gearLedger.posterTitle') || ''; } catch (e) {}
-    $('#poster-title').value = saved || '我的装备库';
-
-    renderPosterBgs();
-    drawPoster();
+    renderPosterPlans(d);
+    renderPosterStyles();
+    renderPosterContent();
+    $('#poster-title').value = poster.title;
+    renderPosterBg();
     openSheet('#poster-sheet');
   }
 
-  function renderPosterBgs() {
-    $('#poster-bgs').innerHTML = POSTER_BGS.map(function (b, i) {
-      return '<button type="button" class="pbg' + (i === poster.bg ? ' on' : '') + '" data-pbg="' + i +
-        '" title="' + b.name + '" style="background:linear-gradient(135deg,' + b.from + ',' + b.to + ')"></button>';
+  function renderPosterPlans(d) {
+    $('#poster-plans').innerHTML =
+      '<button class="ps-plan' + (poster.plan === 'all' ? ' on' : '') + '" data-plan="all">' +
+        '<span class="ps-check">✓</span>' +
+        '全部个人装备<small>' + d.count + ' 件</small>' +
+      '</button>';
+  }
+
+  function renderPosterStyles() {
+    $('#poster-styles').innerHTML = POSTER_STYLES.map(function (s) {
+      return '<button class="ps-style' + (poster.style === s.id ? ' on' : '') + '" data-pstyle="' + s.id + '">' +
+        '<span class="ps-prev ' + s.id + '"></span>' +
+        '<span class="ps-style-name">' + s.name + '</span>' +
+        '<span class="ps-style-desc">' + s.desc + '</span>' +
+      '</button>';
     }).join('');
+  }
+
+  function renderPosterContent() {
+    $('#poster-content').innerHTML = POSTER_CONTENTS.map(function (c) {
+      return '<button class="' + (poster.content === c.id ? 'on' : '') + '" data-pcontent="' + c.id + '">' +
+        c.name + '</button>';
+    }).join('');
+  }
+
+  function renderPosterBg() {
+    var cv = $('#poster-bg-thumb');
+    if (cv) {
+      var g = cv.getContext('2d');
+      g.clearRect(0, 0, cv.width, cv.height);
+      if (poster.bgImage) drawCover(g, poster.bgImage, 0, 0, cv.width, cv.height);
+      else drawMountain(g, 0, 0, cv.width, cv.height);
+    }
+    $('#poster-bg-name').textContent = poster.bgCustom ? '自定义图片' : '默认山脉';
+    $('#poster-bg-reset').classList.toggle('hidden', !poster.bgCustom);
   }
 
   function roundRect(g, x, y, w, h, r) {
@@ -1417,213 +1481,283 @@
     g.closePath();
   }
 
-  function wrapText(g, text, maxW, maxLines) {
-    var out = [], line = '';
-    for (var i = 0; i < text.length; i++) {
-      var test = line + text[i];
-      if (line && g.measureText(test).width > maxW) {
-        out.push(line);
-        line = text[i];
-        if (out.length >= maxLines) break;
-      } else {
-        line = test;
-      }
-    }
-    if (out.length < maxLines && line) out.push(line);
-    if (out.length === maxLines && out.join('').length < text.length) {
-      out[maxLines - 1] = out[maxLines - 1].slice(0, -1) + '…';
-    }
-    return out;
+  function drawMountain(g, x, y, w, h) {
+    var sky = g.createLinearGradient(0, y, 0, y + h);
+    sky.addColorStop(0, '#16233a');
+    sky.addColorStop(.42, '#3f5a80');
+    sky.addColorStop(.72, '#b87a4e');
+    sky.addColorStop(1, '#f0c48a');
+    g.fillStyle = sky;
+    g.fillRect(x, y, w, h);
+
+    // 月亮
+    g.fillStyle = 'rgba(255,242,214,.95)';
+    g.beginPath();
+    g.arc(x + w * .8, y + h * .26, Math.max(6, w * .028), 0, Math.PI * 2);
+    g.fill();
+
+    // 远山
+    g.fillStyle = '#3d4d68';
+    g.beginPath();
+    g.moveTo(x, y + h * .68);
+    g.lineTo(x + w * .18, y + h * .44);
+    g.lineTo(x + w * .36, y + h * .58);
+    g.lineTo(x + w * .54, y + h * .4);
+    g.lineTo(x + w * .76, y + h * .56);
+    g.lineTo(x + w, y + h * .46);
+    g.lineTo(x + w, y + h);
+    g.lineTo(x, y + h);
+    g.closePath();
+    g.fill();
+
+    // 近山
+    g.fillStyle = '#1b2537';
+    g.beginPath();
+    g.moveTo(x, y + h * .88);
+    g.lineTo(x + w * .15, y + h * .64);
+    g.lineTo(x + w * .32, y + h * .78);
+    g.lineTo(x + w * .5, y + h * .58);
+    g.lineTo(x + w * .7, y + h * .76);
+    g.lineTo(x + w, y + h * .62);
+    g.lineTo(x + w, y + h);
+    g.lineTo(x, y + h);
+    g.closePath();
+    g.fill();
   }
 
-  function drawTags(g, tags, cx, y, maxW, sans) {
-    g.font = '600 22px ' + sans;
-    var h = 46, padX = 22, gap = 10;
-    var rows = [[]], rowW = 0;
-    tags.forEach(function (t) {
-      var w = g.measureText(t).width + padX * 2;
-      if (rowW + w > maxW && rows[rows.length - 1].length) {
-        rows.push([]);
-        rowW = 0;
-      }
-      rows[rows.length - 1].push({ t: t, w: w });
-      rowW += w + gap;
-    });
-    g.textAlign = 'center';
-    rows.forEach(function (row, ri) {
-      var total = row.reduce(function (a, b) { return a + b.w + gap; }, -gap);
-      var x = cx - total / 2;
-      row.forEach(function (item) {
-        g.fillStyle = '#f2f4f9';
-        roundRect(g, x, y + ri * (h + 12), item.w, h, 14);
-        g.fill();
-        g.fillStyle = '#5d6272';
-        g.fillText(item.t, x + item.w / 2, y + ri * (h + 12) + 30);
-        x += item.w + gap;
+  function drawCover(g, img, x, y, w, h) {
+    var iw = img.naturalWidth || img.width;
+    var ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return;
+    var scale = Math.max(w / iw, h / ih);
+    var dw = iw * scale, dh = ih * scale;
+    g.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  }
+
+  function drawPosterHead(g, W, headH, d) {
+    var birch = poster.style === 'birch';
+
+    if (birch) {
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, W, headH);
+      var stripe = ['#4354f0', '#e8602f', '#0e9f6e', '#f5a524', '#7c5cf0', '#0ea5e9'];
+      var sw = W / stripe.length;
+      stripe.forEach(function (c, i) {
+        g.fillStyle = c;
+        g.fillRect(i * sw, 0, sw, 8);
       });
-    });
-    return y + rows.length * (h + 12);
-  }
+    } else {
+      if (poster.bgImage) drawCover(g, poster.bgImage, 0, 0, W, headH);
+      else drawMountain(g, 0, 0, W, headH);
 
-  function drawPoster() {
-    var cv = $('#poster-canvas');
-    if (!cv) return;
-    var W = cv.width, H = cv.height;
-    var g = cv.getContext('2d');
-    var bg = POSTER_BGS[poster.bg] || POSTER_BGS[0];
-    var style = $('#poster-style').value;
-    var title = ($('#poster-title').value || '').trim() || '我的装备库';
-    var gear = posterGear();
-    var show = {};
-    $$('#poster-checks input').forEach(function (n) { show[n.value] = n.checked; });
-
-    g.clearRect(0, 0, W, H);
-    var grad = g.createLinearGradient(0, 0, W, H);
-    grad.addColorStop(0, bg.from);
-    grad.addColorStop(1, bg.to);
-    g.fillStyle = grad;
-    g.fillRect(0, 0, W, H);
-
-    g.fillStyle = bg.soft;
-    g.beginPath(); g.arc(W * .88, H * .1, W * .3, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.arc(W * .06, H * .94, W * .24, 0, Math.PI * 2); g.fill();
-
-    var sans = '"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif';
-    g.textBaseline = 'alphabetic';
-    g.textAlign = 'left';
-    g.fillStyle = bg.ink;
-    g.globalAlpha = .72;
-    g.font = '600 26px ' + sans;
-    g.fillText(title.slice(0, 16), 64, 96);
-    g.globalAlpha = 1;
-
-    if (!gear) {
-      g.textAlign = 'center';
-      g.font = '700 34px ' + sans;
-      g.fillStyle = bg.ink;
-      g.fillText('先去装备库加一件装备', W / 2, H / 2);
-      return;
+      var veil = g.createLinearGradient(0, 0, 0, headH);
+      veil.addColorStop(0, 'rgba(6,10,18,.52)');
+      veil.addColorStop(.45, 'rgba(6,10,18,.12)');
+      veil.addColorStop(1, 'rgba(6,10,18,.6)');
+      g.fillStyle = veil;
+      g.fillRect(0, 0, W, headH);
     }
 
-    var name = gear.name || '未命名';
-    var meta = [gear.brand, gear.type].filter(Boolean).join(' · ');
-    var price = Number(gear.refPrice) || 0;
-    var tags = (gear.tags || []).slice(0, 4);
-    var specs = (gear.specs || []).slice(0, 3);
+    var ink = birch ? '#14161c' : '#ffffff';
+    var ink2 = birch ? '#8b90a0' : 'rgba(255,255,255,.72)';
 
-    if (style === 'card') {
-      var cx = 56, cy = 170, cw = W - 112, ch = H - 300;
-      g.fillStyle = 'rgba(255,255,255,.94)';
-      roundRect(g, cx, cy, cw, ch, 34);
+    g.textAlign = 'left';
+    g.fillStyle = ink2;
+    g.font = '600 22px ' + POSTER_SANS;
+    g.fillText('装备台账 · 户外装备清单', 44, 64);
+
+    g.fillStyle = ink;
+    g.font = '800 54px ' + POSTER_SANS;
+    g.fillText(String(poster.title || '个人装备清单').slice(0, 14), 44, 134);
+
+    var dt = new Date();
+    g.fillStyle = ink2;
+    g.font = '500 22px ' + POSTER_SANS;
+    g.fillText(dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate()), 44, 170);
+
+    var stats = [];
+    if (poster.content !== 'price') stats.push({ v: fmtWeight(d.totalW) || '—', k: '总重量' });
+    if (poster.content !== 'weight') stats.push({ v: CUR + money2(d.totalP), k: '总价值' });
+    stats.push({ v: d.count + ' 件', k: '装备数量' });
+    stats.push({ v: d.order.length + ' 类', k: '分类' });
+
+    var r = 58, cy = 254, gapX = 18;
+    var total = stats.length * r * 2 + (stats.length - 1) * gapX;
+    var startX = (W - total) / 2 + r;
+    stats.forEach(function (s, i) {
+      var cx = startX + i * (r * 2 + gapX);
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fillStyle = birch ? 'rgba(67,84,240,.07)' : 'rgba(255,255,255,.12)';
+      g.fill();
+      g.lineWidth = 2.5;
+      g.strokeStyle = birch ? 'rgba(67,84,240,.3)' : 'rgba(255,255,255,.72)';
+      g.stroke();
+
+      g.textAlign = 'center';
+      g.fillStyle = ink;
+      var val = String(s.v);
+      g.font = '800 ' + (val.length > 8 ? 19 : 24) + 'px ' + POSTER_SANS;
+      g.fillText(val, cx, cy + 2);
+      g.fillStyle = ink2;
+      g.font = '500 17px ' + POSTER_SANS;
+      g.fillText(s.k, cx, cy + 28);
+    });
+  }
+
+  function drawPosterBody(g, W, pad, y, rowH, gap, d, st) {
+    var x = pad, w = W - pad * 2;
+    var ink = st === 'wild' ? '#e9ebf1' : '#14161c';
+    var sub = st === 'wild' ? 'rgba(255,255,255,.55)' : '#a0a5b3';
+
+    d.order.forEach(function (cat) {
+      var items = d.groups[cat];
+      var color = CAT_COLORS[cat] || '#8b90a0';
+
+      g.fillStyle = color;
+      roundRect(g, x, y + 2, 7, 24, 3.5);
       g.fill();
 
-      g.textAlign = 'center';
-      g.font = '76px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
-      g.fillText(gear.icon || '📦', W / 2, cy + 150);
+      g.fillStyle = ink;
+      g.font = '800 26px ' + POSTER_SANS;
+      g.textAlign = 'left';
+      g.fillText(cat + '系统', x + 18, y + 23);
 
-      g.fillStyle = '#14161c';
-      g.font = '800 46px ' + sans;
-      var nameLines = wrapText(g, name, cw - 96, 2);
-      var ny = cy + 232;
-      nameLines.forEach(function (ln, i) { g.fillText(ln, W / 2, ny + i * 56); });
+      g.textAlign = 'right';
+      g.fillStyle = sub;
+      g.font = '500 19px ' + POSTER_SANS;
+      g.fillText(items.length + ' 件', x + w, y + 23);
+      y += 42;
 
-      if (show.brand && meta) {
-        g.fillStyle = '#8b90a0';
-        g.font = '500 24px ' + sans;
-        g.fillText(meta, W / 2, ny + nameLines.length * 56 + 4);
-      }
+      items.forEach(function (item, idx) {
+        if (st === 'wild') g.fillStyle = 'rgba(255,255,255,.07)';
+        else if (st === 'list') g.fillStyle = '#ffffff';
+        else g.fillStyle = idx % 2 ? '#fafbfd' : '#ffffff';
+        roundRect(g, x, y, w, 46, 10);
+        g.fill();
 
-      var y = ny + nameLines.length * 56 + (show.brand && meta ? 64 : 26);
+        g.textAlign = 'left';
+        g.font = '22px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
+        g.fillStyle = '#000';
+        g.fillText(item.icon || catIcon(cat), x + 14, y + 31);
 
-      if (show.price && price) {
-        g.fillStyle = '#4354f0';
-        g.font = '800 54px ' + sans;
-        g.fillText(CUR + money2(price), W / 2, y + 42);
-        g.fillStyle = '#a0a5b3';
-        g.font = '500 22px ' + sans;
-        g.fillText('参考价', W / 2, y + 80);
-        y += 122;
-      }
+        g.fillStyle = ink;
+        g.font = '600 21px ' + POSTER_SANS;
+        var nm = item.name || '';
+        var full = nm;
+        while (nm.length > 1 && g.measureText(nm).width > w - 250) nm = nm.slice(0, -1);
+        if (nm !== full) nm = nm.slice(0, -1) + '…';
+        g.fillText(nm, x + 48, y + 30);
 
-      if (show.tags && tags.length) y = drawTags(g, tags, W / 2, y + 8, cw - 120, sans);
+        var bits = [];
+        if (poster.content !== 'price') {
+          var wt = fmtWeight(gearWeight(item));
+          if (wt) bits.push(wt);
+        }
+        if (poster.content !== 'weight' && item.refPrice) {
+          bits.push(CUR + money2(item.refPrice));
+        }
+        g.textAlign = 'right';
+        g.fillStyle = st === 'wild' ? 'rgba(255,255,255,.82)' : '#5d6272';
+        g.font = '500 19px ' + POSTER_SANS;
+        g.fillText(bits.join('    '), x + w - 14, y + 30);
 
-      if (show.specs && specs.length) {
-        var sy = y + 24;
-        specs.forEach(function (s, i) {
-          if (sy + i * 44 > cy + ch - 34) return;
-          g.textAlign = 'left';
-          g.fillStyle = '#8b90a0';
-          g.font = '500 22px ' + sans;
-          g.fillText(String(s.k), cx + 52, sy + i * 44);
-          g.textAlign = 'right';
-          g.fillStyle = '#14161c';
-          g.font = '700 22px ' + sans;
-          g.fillText(String(s.v), cx + cw - 52, sy + i * 44);
-        });
-      }
-    } else {
-      g.textAlign = 'center';
-      g.font = '96px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
-      g.fillStyle = bg.ink;
-      g.fillText(gear.icon || '📦', W / 2, 370);
+        y += rowH;
+      });
 
-      g.font = '800 54px ' + sans;
-      var lines = wrapText(g, name, W - 160, 2);
-      lines.forEach(function (ln, i) { g.fillText(ln, W / 2, 486 + i * 66); });
+      y += gap;
+    });
+  }
 
-      var m2 = 486 + lines.length * 66;
-      if (show.brand && meta) {
-        g.globalAlpha = .8;
-        g.font = '500 26px ' + sans;
-        g.fillText(meta, W / 2, m2 + 8);
-        g.globalAlpha = 1;
-        m2 += 54;
-      }
-      if (show.price && price) {
-        g.font = '800 58px ' + sans;
-        g.fillText(CUR + money2(price), W / 2, m2 + 78);
-        m2 += 108;
-      }
-      if (show.tags && tags.length) {
-        g.globalAlpha = .85;
-        g.font = '500 24px ' + sans;
-        g.fillText(tags.map(function (t) { return '#' + t; }).join('   '), W / 2, m2 + 50);
-        g.globalAlpha = 1;
-        m2 += 52;
-      }
-      if (show.specs && specs.length) {
-        g.globalAlpha = .8;
-        g.font = '500 23px ' + sans;
-        var specTxt = specs.map(function (s) { return s.k + ' ' + s.v; }).join('   ');
-        g.fillText(specTxt, W / 2, m2 + 50);
-        g.globalAlpha = 1;
-      }
-    }
+  function drawPosterFoot(g, W, H, pad, d, st) {
+    var y = H - 58;
+    g.textAlign = 'left';
+    g.fillStyle = st === 'wild' ? 'rgba(255,255,255,.45)' : '#a0a5b3';
+    g.font = '500 18px ' + POSTER_SANS;
+    g.fillText('装备台账 · 记录每一件的重量与价格', pad, y);
 
-    g.textAlign = 'center';
-    g.globalAlpha = .55;
-    g.fillStyle = bg.ink;
-    g.font = '500 22px ' + sans;
-    g.fillText('装备台账 · 记录每一件的成本', W / 2, H - 56);
-    g.globalAlpha = 1;
+    g.textAlign = 'right';
+    g.fillText('共 ' + d.count + ' 件装备', W - pad, y);
+  }
+
+  function buildPoster(d) {
+    var W = 750;
+    var pad = 44;
+    var headH = poster.style === 'birch' ? 336 : 420;
+    var rowH = 54;
+    var gap = 22;
+    var bodyH = 0;
+    d.order.forEach(function (c) { bodyH += 42 + d.groups[c].length * rowH + gap; });
+    var footH = 110;
+    var H = headH + 24 + bodyH + footH;
+
+    var cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    var g = cv.getContext('2d');
+    var st = poster.style;
+
+    if (st === 'wild') g.fillStyle = '#0f1218';
+    else if (st === 'birch') g.fillStyle = '#ffffff';
+    else g.fillStyle = '#f4f2ed';
+    g.fillRect(0, 0, W, H);
+
+    drawPosterHead(g, W, headH, d);
+    drawPosterBody(g, W, pad, headH + 26, rowH, gap, d, st);
+    drawPosterFoot(g, W, H, pad, d, st);
+    return cv;
+  }
+
+  function generatePoster() {
+    var d = posterData();
+    if (!d.count) { toast('装备库里还没有装备'); return; }
+    var cv = buildPoster(d);
+    poster.result = cv.toDataURL('image/png');
+    var img = $('#poster-result-img');
+    if (img) img.src = poster.result;
+    closeSheet('#poster-sheet');
+    openSheet('#poster-view-sheet');
+    setTimeout(function () {
+      var sc = $('#poster-view-sheet .sheet-scroll');
+      if (sc) sc.scrollTop = 0;
+    }, 60);
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    var parts = String(dataUrl).split(',');
+    var mime = (parts[0].match(/:(.*?);/) || [])[1] || 'image/png';
+    var bin = atob(parts[1]);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
   }
 
   function savePoster() {
-    var cv = $('#poster-canvas');
-    if (!cv) return;
-    var gear = posterGear();
-    var fname = '装备图_' + (gear ? gear.name : '海报') + '.png';
+    if (!poster.result) { toast('先点「生成」'); return; }
+    var name = String(poster.title || '装备清单').replace(/[\\/:*?"<>|]/g, '');
     try {
-      cv.toBlob(function (blob) {
-        if (!blob) { toast('图片生成失败'); return; }
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = fname;
-        a.click();
-        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-        toast('图片已保存');
-      }, 'image/png');
-    } catch (e) { toast('图片生成失败'); }
+      var url = URL.createObjectURL(dataUrlToBlob(poster.result));
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name + '.png';
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+      toast('图片已保存');
+    } catch (e) {
+      toast('保存失败，可以长按图片保存');
+    }
+  }
+
+  function zoomPoster() {
+    if (!poster.result) return;
+    try {
+      var url = URL.createObjectURL(dataUrlToBlob(poster.result));
+      var w = window.open(url, '_blank');
+      if (!w) toast('长按图片可以保存');
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    } catch (e) {
+      toast('长按图片可以保存');
+    }
   }
 
   function pickFile(accept, cb) {
@@ -2166,14 +2300,39 @@
     }
 
     // 生成装备图片
-    var pbgBtn = el.closest('[data-pbg]');
-    if (pbgBtn) {
-      poster.bg = Number(pbgBtn.getAttribute('data-pbg')) || 0;
-      renderPosterBgs();
-      drawPoster();
+    var planBtn = el.closest('[data-plan]');
+    if (planBtn) {
+      poster.plan = planBtn.getAttribute('data-plan');
+      renderPosterPlans(posterData());
       return;
     }
+    var pstyleBtn = el.closest('[data-pstyle]');
+    if (pstyleBtn) {
+      poster.style = pstyleBtn.getAttribute('data-pstyle');
+      renderPosterStyles();
+      return;
+    }
+    var pcontentBtn = el.closest('[data-pcontent]');
+    if (pcontentBtn) {
+      poster.content = pcontentBtn.getAttribute('data-pcontent');
+      renderPosterContent();
+      return;
+    }
+    if (el.closest('#poster-bg-pick')) {
+      var bgFile = $('#poster-bg-file');
+      if (bgFile) bgFile.click();
+      return;
+    }
+    if (el.closest('#poster-bg-reset')) {
+      poster.bgImage = null;
+      poster.bgCustom = false;
+      renderPosterBg();
+      return;
+    }
+    if (el.closest('#poster-gen')) { generatePoster(); return; }
+    if (el.closest('#poster-cancel')) { closeSheet('#poster-sheet'); return; }
     if (el.closest('#poster-save')) { savePoster(); return; }
+    if (el.closest('#poster-result-img')) { zoomPoster(); return; }
 
     // 菜单
     var mi = el.closest('[data-menu]');
@@ -2356,16 +2515,30 @@
     var el = ev.target;
     if (el.id === 'mine-cur') { setCur(el.value); return; }
     if (el.id === 'mine-theme') { setTheme(el.value); return; }
-    if (el.id === 'poster-gear') { poster.gearId = el.value; drawPoster(); return; }
-    if (el.id === 'poster-style') { drawPoster(); return; }
-    if (el.closest && el.closest('#poster-checks')) { drawPoster(); return; }
+    if (el.id === 'poster-bg-file') {
+      var file = el.files && el.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          poster.bgImage = img;
+          poster.bgCustom = true;
+          renderPosterBg();
+          toast('背景已更换');
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
   });
 
   document.addEventListener('input', function (ev) {
     var el = ev.target;
     if (el.id === 'poster-title') {
-      try { localStorage.setItem('gearLedger.posterTitle', el.value); } catch (e) {}
-      drawPoster();
+      poster.title = el.value.trim() || '个人装备清单';
+      try { localStorage.setItem('gearLedger.posterTitle', poster.title); } catch (e) {}
     }
   });
 

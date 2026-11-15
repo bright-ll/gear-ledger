@@ -763,33 +763,116 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .cats-tip{font-size:11.5px;color:var(--muted);padding:14px 20px calc(20px + var(--safe-b));line-height:1.6;text-align:center}
 
 /* 生成装备图片 */
-.poster-scroll{padding-bottom:calc(20px + var(--safe-b))}
-.poster-stage{padding:14px 14px 0}
-.poster-stage canvas{
-  width:100%;height:auto;display:block;border-radius:16px;
-  box-shadow:0 10px 28px rgba(20,22,28,.16);
+.poster-scroll{padding:0 14px calc(24px + var(--safe-b))}
+.ps-sub{margin:14px 4px 2px;font-size:12.5px;color:var(--sub)}
+.ps-sec{display:flex;align-items:center;gap:7px;font-size:15px;font-weight:800;margin:22px 4px 10px}
+.ps-sec span{font-size:16px;line-height:1}
+.ps-tip{font-size:11.5px;color:var(--muted);margin:8px 4px 0;line-height:1.6}
+.ps-tip.center{text-align:center;margin:12px 0 6px}
+
+.ps-plans,.ps-styles{
+  display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;
+  padding:2px 4px 6px;margin:0 -4px;
 }
-.poster-form{margin:14px 14px 0;background:var(--card);border-radius:var(--radius);overflow:hidden}
-.poster-row{
-  display:flex;align-items:center;gap:12px;padding:13px 16px;
-  border-bottom:1px solid var(--line2);font-size:14.5px;
+.ps-plans::-webkit-scrollbar,.ps-styles::-webkit-scrollbar{display:none}
+
+/* 装备方案卡 */
+.ps-plan{
+  flex:none;min-width:144px;padding:12px 14px;border-radius:14px;
+  background:var(--card);border:1.5px solid var(--line);text-align:left;
+  font-size:14px;font-weight:700;position:relative;color:var(--text);
 }
-.poster-row:last-child{border-bottom:0}
-.poster-row > span:first-child{flex:none;width:64px;color:var(--sub);font-size:13px}
-.poster-row input:not([type=checkbox]){
-  flex:1;min-width:0;border:0;outline:0;background:none;text-align:right;font-weight:600;
+.ps-plan small{display:block;font-size:11.5px;font-weight:500;color:var(--muted);margin-top:3px}
+.ps-plan.on{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
+.ps-plan.on small{color:var(--blue);opacity:.8}
+.ps-plan .ps-check{position:absolute;right:10px;top:8px;font-size:13px;color:var(--blue);display:none}
+.ps-plan.on .ps-check{display:block}
+
+/* 图片样式卡 */
+.ps-style{
+  flex:none;width:148px;border-radius:14px;overflow:hidden;
+  border:1.5px solid var(--line);background:var(--card);text-align:center;
+  padding-bottom:10px;color:var(--text);
 }
-.poster-row select{
-  flex:1;border:0;outline:0;background:none;text-align:right;font-weight:600;
-  color:var(--blue);appearance:none;-webkit-appearance:none;
+.ps-style.on{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+.ps-prev{display:block;height:110px;position:relative;overflow:hidden}
+.ps-style-name{display:block;font-size:12.5px;font-weight:700;margin-top:8px}
+.ps-style.on .ps-style-name{color:var(--blue)}
+.ps-style-desc{display:block;font-size:10.5px;color:var(--muted);margin-top:2px}
+
+/* 缩略图：装备清单版 */
+.ps-prev.list{background:#eef0f5}
+.ps-prev.list::before{
+  content:"";position:absolute;left:0;right:0;top:0;height:42px;
+  background:linear-gradient(160deg,#2b374b,#5d7089 60%,#c98d5c);
 }
-.poster-row.col{flex-direction:column;align-items:stretch;gap:10px}
-.poster-bgs{display:flex;gap:10px;flex-wrap:wrap}
-.pbg{
-  width:38px;height:38px;border-radius:50%;border:2px solid transparent;
-  box-shadow:inset 0 0 0 1px rgba(0,0,0,.06);transition:.15s;
+.ps-prev.list::after{
+  content:"";position:absolute;left:9px;right:9px;top:52px;bottom:8px;border-radius:7px;
+  background:repeating-linear-gradient(to bottom,#fff 0 8px,transparent 8px 16px);
 }
-.pbg.on{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
-.poster-checks{display:flex;flex-wrap:wrap;gap:9px 18px;font-size:14px}
-.poster-checks label{display:flex;align-items:center;gap:6px}
-.poster-checks input{width:18px;height:18px;accent-color:var(--blue)}
+/* 缩略图：山野氛围版 */
+.ps-prev.wild{background:linear-gradient(180deg,#141b2b,#3b4a63 55%,#c98d5c)}
+.ps-prev.wild::before{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:52px;background:#151d2b;
+  clip-path:polygon(0 100%,0 62%,18% 30%,36% 58%,54% 24%,74% 50%,100% 34%,100% 100%);
+}
+.ps-prev.wild::after{
+  content:"";position:absolute;left:9px;right:9px;top:12px;bottom:58px;border-radius:6px;
+  background:repeating-linear-gradient(to bottom,rgba(255,255,255,.9) 0 6px,transparent 6px 14px);
+  opacity:.5;
+}
+/* 缩略图：装备白桦版 */
+.ps-prev.birch{background:#fff}
+.ps-prev.birch::before{
+  content:"";position:absolute;left:9px;right:9px;top:10px;height:10px;border-radius:3px;
+  background:linear-gradient(90deg,#4354f0 0 22%,#e8602f 22% 40%,#0e9f6e 40% 62%,#f5a524 62% 80%,#7c5cf0 80% 100%);
+  opacity:.85;
+}
+.ps-prev.birch::after{
+  content:"";position:absolute;left:9px;right:9px;top:30px;bottom:8px;
+  background:repeating-linear-gradient(to bottom,#eef0f5 0 6px,transparent 6px 14px);
+}
+
+/* 展示内容分段 */
+.ps-seg{display:flex;gap:4px;background:var(--card2);border-radius:12px;padding:4px}
+.ps-seg button{
+  flex:1;padding:10px 4px;border-radius:9px;font-size:13px;font-weight:700;
+  color:var(--sub);transition:.15s;
+}
+.ps-seg button.on{background:var(--card);color:var(--blue);box-shadow:0 2px 8px rgba(20,22,28,.08)}
+
+/* 海报名称 */
+.ps-input{
+  width:100%;border:0;outline:0;background:var(--card);border-radius:12px;
+  padding:14px 15px;font-size:15px;font-weight:600;
+}
+
+/* 背景选择 */
+.ps-bg{
+  width:100%;display:flex;align-items:center;gap:11px;text-align:left;
+  background:var(--card);border-radius:14px;padding:10px 12px;
+}
+.ps-bg canvas{width:56px;height:42px;border-radius:8px;flex:none;background:#2b3444}
+.ps-bg-main{flex:1;min-width:0}
+.ps-bg-main b{display:block;font-size:14px;font-weight:700}
+.ps-bg-main small{font-size:11.5px;color:var(--muted)}
+.ps-bg-chev{color:var(--blue);font-size:22px;font-weight:600;line-height:1}
+.ps-bg-reset{
+  display:block;margin:9px auto 0;font-size:12px;color:var(--blue);
+  padding:6px 12px;border-radius:8px;background:var(--blue-soft);
+}
+
+/* 底部按钮 */
+.ps-dock{display:flex;gap:10px}
+.ps-dock .btn-main{flex:1;border-radius:14px}
+.poster-gen{
+  background:linear-gradient(135deg,#3d5cff,#22b8c8);
+  box-shadow:0 8px 20px rgba(61,92,255,.28);
+}
+
+/* 结果预览 */
+.poster-view-scroll{background:var(--bg);overflow-x:hidden}
+.poster-result{
+  display:block;width:calc(100% - 28px);margin:6px auto 20px;border-radius:12px;
+  box-shadow:0 10px 28px rgba(20,22,28,.16);cursor:zoom-in;
+}
