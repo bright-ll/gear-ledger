@@ -67,6 +67,8 @@
   function isImgIcon(v) { return typeof v === 'string' && v.indexOf('data:image/') === 0; }
   function svgIcon(v) { return (window.GL_ICONS && typeof v === 'string') ? window.GL_ICONS[v] : ''; }
   function iconMarkup(v) {
+    var three = (window.GL_ICON3D && typeof v === 'string') ? window.GL_ICON3D[v] : '';
+    if (three) return '<img class="ico-img ico-3d" src="' + three + '" alt="">';
     if (isImgIcon(v)) return '<img class="ico-img" src="' + esc(v) + '" alt="">';
     var s = svgIcon(v);
     if (s) return '<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true">' + s + '</svg>';
@@ -420,18 +422,28 @@
     }
   }
   function buildIconPicker(box, attr) {
-    if (!box || !window.GL_ICONS || !window.GL_ICON_GROUPS) return;
+    if (!box) return;
+    var use3d = !!(window.GL_ICON3D && window.GL_ICON3D_GROUPS);
+    var groups = use3d ? window.GL_ICON3D_GROUPS : (window.GL_ICON_GROUPS || []);
+    if (!groups.length) return;
     var html = '<div class="icon-src">' +
       '<button type="button" class="icon-src-btn" data-icon-src="album" data-icon-for="' + attr + '">相册</button>' +
       '<button type="button" class="icon-src-btn" data-icon-src="camera" data-icon-for="' + attr + '">拍照</button>' +
       '<button type="button" class="text-btn danger icon-clear hidden" data-icon-src="clear" data-icon-for="' + attr + '">清除图片</button>' +
-      '</div><p class="icon-src-tip">用内置图标，或从相册选一张、拍一张当图标。</p>';
-    html += window.GL_ICON_GROUPS.map(function (grp) {
+      '</div><p class="icon-src-tip">用内置彩色图标，或从相册选一张、拍一张当图标。</p>';
+    html += groups.map(function (grp) {
       return '<div class="icon-group"><div class="icon-group-t">' + esc(grp.name) + '</div><div class="icon-grid">' +
         grp.ids.map(function (id) {
-          if (!window.GL_ICONS[id]) return '';
+          if (use3d) {
+            var src = window.GL_ICON3D[id];
+            if (!src) return '';
+            return '<button type="button" data-' + attr + '="' + id + '" title="' + esc(id) + '" aria-label="' + esc(id) + '">' +
+              '<img class="ico-3d" src="' + src + '" alt="" loading="lazy"></button>';
+          }
+          var svg = window.GL_ICONS && window.GL_ICONS[id];
+          if (!svg) return '';
           return '<button type="button" data-' + attr + '="' + id + '" title="' + esc(id) + '" aria-label="' + esc(id) + '">' +
-            '<svg viewBox="0 0 24 24" aria-hidden="true">' + window.GL_ICONS[id] + '</svg></button>';
+            '<svg viewBox="0 0 24 24" aria-hidden="true">' + svg + '</svg></button>';
         }).join('') + '</div></div>';
     }).join('');
     box.innerHTML = html;
@@ -2953,7 +2965,12 @@
 
     // 图标选择
     if (el.closest('#icon-preview')) {
-      $('#icon-picker').classList.toggle('hidden');
+      var iconBox = $('#icon-picker');
+      if (!iconBox.getAttribute('data-built')) {
+        buildIconPicker(iconBox, 'icon');
+        iconBox.setAttribute('data-built', '1');
+      }
+      iconBox.classList.toggle('hidden');
       markIconPicker('asset');
       return;
     }
@@ -2983,7 +3000,12 @@
 
     // 装备图标选择
     if (el.closest('#gicon-preview')) {
-      $('#gicon-picker').classList.toggle('hidden');
+      var gIconBox = $('#gicon-picker');
+      if (!gIconBox.getAttribute('data-built')) {
+        buildIconPicker(gIconBox, 'gicon');
+        gIconBox.setAttribute('data-built', '1');
+      }
+      gIconBox.classList.toggle('hidden');
       markIconPicker('gear');
       return;
     }
@@ -3135,13 +3157,9 @@
     return '<option>' + esc(c) + '</option>';
   }).join('');
 
-  buildIconPicker($('#icon-picker'), 'icon');
-
   $('#geditor-cat').innerHTML = GEAR_CATS.map(function (c) {
     return '<option>' + c + '</option>';
   }).join('');
-
-  buildIconPicker($('#gicon-picker'), 'gicon');
 
   /* 外观与货币 */
   applyTheme();

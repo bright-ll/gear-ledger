@@ -730,6 +730,17 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .st-life-ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:15px;flex:none;line-height:1;overflow:hidden}
 .st-life-ic .ico-svg{width:18px;height:18px}
 .st-life-ic .ico-img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+/* 彩色 3D 图标（Fluent Emoji）：透明底，等比放进各个容器 */
+.ico-3d{object-fit:contain}
+.a-icon .ico-3d{width:34px;height:34px}
+.acard-top .ico-3d{width:48px;height:48px}
+.detail-icon .ico-3d{width:56px;height:56px}
+.gl-ico .ico-3d{width:36px;height:36px}
+.st-life-ic .ico-3d{width:26px;height:26px}
+.card-media .ico-3d{width:52px;height:52px}
+#gear-grid .card-media .ico-3d{width:40px;height:40px}
+.icon-preview .ico-3d{width:28px;height:28px}
+.icon-grid button .ico-3d{width:30px;height:30px}
 [data-theme="dark"] .st-life-ic{filter:brightness(.8) saturate(.85)}
 .st-life-body{flex:1;min-width:0}
 .st-life-top{display:flex;align-items:center;justify-content:space-between;gap:8px}

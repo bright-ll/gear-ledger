@@ -3,14 +3,15 @@
    策略：联网时先取最新文件，断网时用缓存。
    这样上传新版本后刷新就能看到，不会被旧缓存卡住。
    ========================================================= */
-var CACHE = 'gear-ledger-v21';
+var CACHE = 'gear-ledger-v22';
 var CORE = [
   './index.html',
-  './styles.css?v=21',
-  './app.js?v=21',
-  './icons.js?v=21',
-  './cloud.js?v=21',
-  './config.js?v=21',
+  './styles.css?v=22',
+  './app.js?v=22',
+  './icons.js?v=22',
+  './icons3d.js?v=22',
+  './cloud.js?v=22',
+  './config.js?v=22',
   './manifest.json',
   './icon.svg',
   './icon-192.png',

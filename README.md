@@ -74,4 +74,5 @@
 
 > 装备库里的内容是示例数据，可在 ⚙ 里清空后录入自己的，或直接改 `app.js` 里的 `seedGear()`。
 >
-> 图标：Tabler Icons（https://github.com/tabler/tabler-icons，MIT License）。
+> 图标：Microsoft Fluent Emoji（彩色 3D，https://github.com/microsoft/fluentui-emoji，MIT License）
+> 与 Tabler Icons（线框，https://github.com/tabler/tabler-icons，MIT License）。
