@@ -28,7 +28,17 @@
     { k: '1500to3000', label: '1500–3000' },
     { k: 'gt3000', label: '3000 以上' }
   ];
-  var GEAR_CATS = ['户外', '睡眠', '背负', '鞋靴', '照明', '炊具', '其他'];
+  /* 装备库分类：固定 8 类，界面不提供增删入口，不从 storage 读取 */
+  var GEAR_CATS = ['背负', '穿着', '鞋袜', '睡眠', '饮食', '行进', '安全', '数码'];
+  var GEAR_CAT_ICON = {
+    '背负': '🎒', '穿着': '🧥', '鞋袜': '🥾', '睡眠': '🛌',
+    '饮食': '🍳', '行进': '🧭', '安全': '🛡️', '数码': '📱'
+  };
+  /* 仅用于兼容历史数据：旧分类 → 新分类的兜底 */
+  var GEAR_CAT_LEGACY = {
+    '户外': '行进', '睡眠': '睡眠', '背负': '背负', '鞋靴': '鞋袜',
+    '照明': '行进', '炊具': '饮食', '其他': '行进'
+  };
   var ICONS = ['🎒','🧥','👟','🥾','⛺','🛌','🔦','🧭','🍳','💧','🧦','🧤','🧢','🕶','⌚',
                '🔋','📱','💻','🎧','📷','🔌','💡','🖥','⌨️','🖱',
                '🪑','🛋','🛏','🗄','🚪','🏠','🧺','🧽','🧴','🪥',
@@ -265,6 +275,54 @@
     if (changed) saveAll();
   })();
 
+  /* ---------- 装备分类归一 ---------- */
+  /* 新数据直接用 8 类；历史数据（户外/照明/炊具…）按名称猜一次，兜底归到「行进」 */
+  function mapGearCat(g) {
+    var cat = g && g.cat;
+    if (GEAR_CATS.indexOf(cat) >= 0) return cat;
+    var hay = [g && g.name, g && g.type, (g && g.tags || []).join(' ')].join(' ').toLowerCase();
+    if (/帐|篷|睡袋|睡垫|枕头/.test(hay)) return '睡眠';
+    if (/背包|重装包|腰包|驮包|背负/.test(hay)) return '背负';
+    if (/鞋|靴|袜|鞋垫|雪套|冰爪/.test(hay)) return '鞋袜';
+    if (/冲锋衣|软壳|硬壳|羽绒|抓绒|衣|裤|帽|手套|围脖/.test(hay)) return '穿着';
+    if (/炉|锅|杯|餐具|水壶|气罐|净水/.test(hay)) return '饮食';
+    if (/杖|灯|导航|表|水袋|头巾|墨镜/.test(hay)) return '行进';
+    if (/急救|头盔|安全带|主锁|绳索|哨/.test(hay)) return '安全';
+    if (/相机|手机|对讲|gps|充电|电池/.test(hay)) return '数码';
+    return GEAR_CAT_LEGACY[cat] || '行进';
+  }
+
+  /* 旧数据一次性升级：分类归一 + 补 weight / gearCat / officialPrice 字段。
+     幂等，重置示例数据后也会再跑一次。 */
+  function normalizeGearData(gearList, itemList) {
+    var changed = false;
+    (gearList || []).forEach(function (g) {
+      if (g.deleted) return;
+      if (GEAR_CATS.indexOf(g.cat) < 0) { g.cat = mapGearCat(g); changed = true; }
+      if (g.weight == null) {
+        var w = gearWeight(g);
+        if (w) { g.weight = w; changed = true; }
+      }
+    });
+    (itemList || []).forEach(function (it) {
+      if (it.deleted) return;
+      if (it.gearCat == null) { it.gearCat = ''; changed = true; }
+      if (it.weight == null) { it.weight = 0; changed = true; }
+      if (it.officialPrice == null) { it.officialPrice = 0; changed = true; }
+      if (it.catalogId) {
+        var g = (gearList || []).find(function (x) { return x.id === it.catalogId; });
+        if (g && !g.deleted) {
+          if (!it.gearCat) { it.gearCat = g.cat; changed = true; }
+          if (!it.weight) { it.weight = Number(g.weight) || 0; changed = true; }
+          if (!it.officialPrice) { it.officialPrice = Number(g.refPrice) || 0; changed = true; }
+        }
+      }
+    });
+    return changed;
+  }
+
+  if (normalizeGearData(DB.gear, DB.items)) saveAll();
+
   var state = {
     tab: 'assets',
     status: '全部',
@@ -294,6 +352,7 @@
     gearId: null,
     editingId: null,
     editingGearId: null,
+    editingCatalogId: null,
     formIcon: '📦',
     gearFormIcon: '📦'
   };
@@ -339,7 +398,15 @@
       '家电': 'linear-gradient(150deg,#eefaf4,#ddf3e8)',
       '生活用品': 'linear-gradient(150deg,#fff6ec,#ffe9d6)',
       '家具': 'linear-gradient(150deg,#f7f2ea,#efe3d3)',
-      '其他': 'linear-gradient(150deg,#f7f8fc,#eceef8)'
+      '其他': 'linear-gradient(150deg,#f7f8fc,#eceef8)',
+      /* 装备库 8 类 */
+      '背负': 'linear-gradient(150deg,#eef4ff,#e0e9ff)',
+      '穿着': 'linear-gradient(150deg,#fff1ee,#ffe0d8)',
+      '鞋袜': 'linear-gradient(150deg,#eefaf4,#ddf3e8)',
+      '睡眠': 'linear-gradient(150deg,#f3efff,#e9e2ff)',
+      '饮食': 'linear-gradient(150deg,#fff6ec,#ffe9d6)',
+      '行进': 'linear-gradient(150deg,#e8f6ff,#d8ecff)',
+      '安全': 'linear-gradient(150deg,#fff0f3,#ffe0e6)'
     };
     return map[cat] || map['其他'];
   }
@@ -352,7 +419,7 @@
       if (state.status !== '全部' && statusOf(it, c) !== state.status) return false;
       if (state.cat !== '全部分类' && it.cat !== state.cat) return false;
       if (q) {
-        var hay = (it.name + ' ' + (it.notes || '') + ' ' + it.cat).toLowerCase();
+        var hay = (it.name + ' ' + (it.notes || '') + ' ' + it.cat + ' ' + (it.gearCat || '')).toLowerCase();
         if (hay.indexOf(q) < 0) return false;
       }
       return true;
@@ -368,10 +435,36 @@
   /* =========================================================
      渲染：资产列表
      ========================================================= */
-  function renderTopbar() {
-    $('#state-tabs').innerHTML = STATES.map(function (s) {
-      return '<button data-state="' + s + '" class="' + (state.status === s ? 'on' : '') + '">' + s + '</button>';
+  /* ---------- 资产筛选 ---------- */
+  function updateAssetFilterBtn() {
+    var btn = $('#btn-afilter');
+    if (!btn) return;
+    var on = state.status !== '全部';
+    btn.classList.toggle('on', on);
+    var badge = $('#afilter-count');
+    if (badge) badge.textContent = on ? '1' : '';
+  }
+
+  function renderAssetFilter() {
+    var body = $('#afilter-body');
+    if (!body) return;
+    var statusHtml = STATES.map(function (s) {
+      return '<button class="chip ' + (state.status === s ? 'on' : '') + '" data-afstatus="' + s + '">' + s + '</button>';
     }).join('');
+    var catHtml = ['全部分类'].concat(CATS).map(function (c) {
+      return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-afcat2="' + esc(c) + '">' + esc(c) + '</button>';
+    }).join('');
+    body.innerHTML =
+      '<div class="fgroup"><h4>使用状态</h4><div class="fchips">' + statusHtml + '</div></div>' +
+      '<div class="fgroup"><h4>分类</h4><div class="fchips">' + catHtml + '</div></div>';
+    var apply = $('#btn-afilter-apply');
+    if (apply) apply.textContent = '查看 ' + filteredItems().length + ' 件';
+    updateAssetFilterBtn();
+  }
+
+  function openAssetFilter() {
+    renderAssetFilter();
+    openSheet('#afilter-sheet');
   }
 
   /* ---------- 横滑筛选条：保持选中项可见 + 右缘提示 ---------- */
@@ -522,7 +615,7 @@
   }
 
   function renderAssets() {
-    renderTopbar();
+    updateAssetFilterBtn();
     renderCatChips();
     renderDemoTip();
 
@@ -598,6 +691,9 @@
       ['到期提醒', it.hasExpiry ? '开启' : '关闭', ''],
       ['分类', it.cat, '']
     ];
+    if (it.gearCat) cells.push(['装备分类', it.gearCat, '']);
+    if (it.weight) cells.push(['重量', fmtWeight(it.weight), 'mono']);
+    if (it.officialPrice) cells.push(['官方价', CUR +  money2(it.officialPrice), 'mono']);
 
     var grid = cells.map(function (x) {
       var cls = 'dg';
@@ -652,11 +748,16 @@
       }
     }
 
+    // 已关联装备库：提供「移出资产」，只断开关系、不删资料卡
+    var unlinkBlock = it.catalogId
+      ? '<div class="unlink-wrap"><button class="btn-main ghost" data-unlink="' + it.id + '">移出资产（保留装备库资料）</button></div>'
+      : '';
+
     $('#detail-body').innerHTML =
       '<div class="detail-icon" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
       '<div class="detail-card"><div class="detail-grid">' + grid + '</div></div>' +
       '<div class="detail-card"><div class="detail-grid">' + grid2 + '</div></div>' +
-      useBlock + gearBlock + noteBlock + '<div style="height:8px"></div>';
+      useBlock + gearBlock + unlinkBlock + noteBlock + '<div style="height:8px"></div>';
 
     openSheet('#detail-sheet');
   }
@@ -667,6 +768,7 @@
   function openEditor(item, preset) {
     var f = $('#editor-form');
     state.editingId = item ? item.id : null;
+    state.editingCatalogId = (item && item.catalogId) || (preset && preset.catalogId) || null;
     state.formIcon = (item && item.icon) || (preset && preset.icon) || '📦';
 
     $('#editor-title').textContent = item ? '编辑' : '新增';
@@ -695,18 +797,57 @@
     f.elements.baseCount.value = d.baseCount || 0;
     f.elements.notes.value = d.notes || '';
 
-    // 关联装备：只在编辑时选择，设备详情页会带出参数
-    var catSel = f.elements.catalogId;
-    if (catSel) {
-      catSel.innerHTML = '<option value="">不关联</option>' + DB.gear.filter(function (g) {
-        return !g.deleted;
-      }).map(function (g) {
-        return '<option value="' + esc(g.id) + '">' + esc(g.name) + (g.brand ? ' · ' + esc(g.brand) : '') + '</option>';
+    // 装备分类：和装备库共用同一套 8 类，非户外物品可以留空
+    var gcatSel = f.elements.gearCat;
+    if (gcatSel) {
+      gcatSel.innerHTML = '<option value="">不适用</option>' + GEAR_CATS.map(function (c) {
+        return '<option>' + c + '</option>';
       }).join('');
-      catSel.value = d.catalogId || '';
+      gcatSel.value = d.gearCat || '';
+    }
+    f.elements.weight.value = d.weight ? d.weight : '';
+    f.elements.officialPrice.value = d.officialPrice != null ? d.officialPrice : '';
+
+    // 关联关系只能由「加入我的资产」建立，这里只读展示
+    var linkRow = $('#editor-link-row');
+    if (linkRow) {
+      if (state.editingCatalogId) {
+        var lg = DB.gear.find(function (g) { return g.id === state.editingCatalogId; });
+        linkRow.classList.remove('hidden');
+        $('#editor-link-name').textContent = lg
+          ? lg.name + (lg.brand ? ' · ' + lg.brand : '')
+          : '关联的装备已删除';
+      } else {
+        linkRow.classList.add('hidden');
+      }
     }
 
     openSheet('#editor-sheet');
+  }
+
+  /* 资产 → 装备库：只写共享字段，资产独有的入手价/日期/备注不污染资料卡 */
+  function syncGearFromItem(item) {
+    if (!item.catalogId) return;
+    var g = DB.gear.find(function (x) { return x.id === item.catalogId && !x.deleted; });
+    if (!g) return;
+    g.name = item.name;
+    if (item.gearCat) g.cat = item.gearCat;
+    g.weight = Number(item.weight) || 0;
+    g.refPrice = Number(item.officialPrice) || 0;
+    if (item.icon) g.icon = item.icon;
+    g.updatedAt = Date.now();
+  }
+
+  /* 装备库 → 资产：只写共享字段，不动资产的入手价和成本参数 */
+  function syncItemFromGear(gear) {
+    var it = ownedItem(gear.id);
+    if (!it) return;
+    it.name = gear.name;
+    it.gearCat = gear.cat;
+    it.weight = Number(gear.weight) || 0;
+    it.officialPrice = Number(gear.refPrice) || 0;
+    if (gear.icon) it.icon = gear.icon;
+    it.updatedAt = Date.now();
   }
 
   function saveEditor(e) {
@@ -714,10 +855,20 @@
     var f = $('#editor-form');
     var el = f.elements;
 
+    // 从装备库加入的装备必须填实际到手价，参考价只是参考
+    if (state.editingCatalogId && String(el.price.value).trim() === '') {
+      toast('请填写实际到手价');
+      el.price.focus();
+      return;
+    }
+
     var item = {
       id: state.editingId || uid(),
       name: el.name.value.trim(),
       cat: el.cat.value,
+      gearCat: el.gearCat ? el.gearCat.value : '',
+      weight: Number(el.weight.value) || 0,
+      officialPrice: Number(el.officialPrice.value) || 0,
       icon: state.formIcon,
       purchaseDate: el.purchaseDate.value,
       price: Number(el.price.value) || 0,
@@ -731,7 +882,7 @@
       resale: Number(el.resale.value) || 0,
       trackPerUse: el.trackPerUse.checked,
       baseCount: Number(el.baseCount.value) || 0,
-      catalogId: el.catalogId && el.catalogId.value ? el.catalogId.value : null,
+      catalogId: state.editingCatalogId || null,
       useLog: [],
       notes: el.notes.value.trim(),
       updatedAt: Date.now(),
@@ -739,16 +890,20 @@
     };
 
     var idx = DB.items.findIndex(function (x) { return x.id === item.id; });
+    var isNew = idx < 0;
     if (idx >= 0) {
       item.useLog = DB.items[idx].useLog || [];
       DB.items[idx] = item;
     } else {
       DB.items.unshift(item);
     }
+    syncGearFromItem(item);
     saveAll();
     closeSheet('#editor-sheet');
     renderAssets();
-    toast(idx >= 0 ? '已更新' : '已添加');
+    renderGear();
+    if (isNew && item.catalogId) toast('已加入资产');
+    else toast(idx >= 0 ? '已更新' : '已添加');
   }
 
   /* =========================================================
@@ -758,11 +913,11 @@
     var q = state.gearQ.trim().toLowerCase();
     return DB.gear.filter(function (g) {
       if (g.deleted) return false;
-      if (state.gearCat !== '全部' && g.cat !== state.gearCat) return false;
+      if (state.gearCat !== '全部' && mapGearCat(g) !== state.gearCat) return false;
       if (state.gearBrand !== '全部' && g.brand !== state.gearBrand) return false;
       if (state.gearType !== '全部' && g.type !== state.gearType) return false;
       if (state.gearFav && !g.fav) return false;
-      var p = Number(g.refPrice) || 0;
+      var p = gearPrice(g);
       if (state.gearPrice === 'lt500' && p >= 500) return false;
       if (state.gearPrice === '500to1500' && (p < 500 || p >= 1500)) return false;
       if (state.gearPrice === '1500to3000' && (p < 1500 || p >= 3000)) return false;
@@ -773,14 +928,12 @@
     });
   }
 
-  var CAT_ICON = {
-    '户外': '🏕', '睡眠': '🌙', '背负': '🎒', '鞋靴': '🥾',
-    '照明': '🔦', '炊具': '🔥', '其他': '📦'
-  };
-  function catIcon(c) { return CAT_ICON[c] || '📦'; }
+  function catIcon(c) { return GEAR_CAT_ICON[c] || '📦'; }
 
-  /* 从标签/参数里识别重量，取第一个能认的 g / kg */
+  /* 从标签/参数里识别重量，取第一个能认的 g / kg；显式 weight 字段优先 */
   function gearWeight(g) {
+    var w0 = Number(g && g.weight);
+    if (w0 > 0) return w0;
     var hay = (g.tags || []).slice();
     (g.specs || []).forEach(function (s) { hay.push((s.k || '') + ' ' + (s.v || '')); });
     for (var i = 0; i < hay.length; i++) {
@@ -796,11 +949,18 @@
     return w + 'g';
   }
 
+  /* 装备库展示价：已加入资产看实付（和资产列表同口径，含数量/附加/二手净成本），
+     没加入资产看参考价 */
+  function gearPrice(g) {
+    var own = ownedItem(g.id);
+    return own ? calc(own).net : (Number(g.refPrice) || 0);
+  }
+
   function gearMeta(g) {
     var bits = [];
     if (g.brand) bits.push(g.brand);
     if (g.type) bits.push(g.type);
-    return bits.join(' · ') || g.cat || '';
+    return bits.join(' · ') || mapGearCat(g);
   }
 
   /* ---------- 三种视图的单条渲染 ---------- */
@@ -809,7 +969,7 @@
     var oc = own ? calc(own) : null;
     var w = fmtWeight(gearWeight(g));
     return '<article class="card" data-gid="' + g.id + '">' +
-      '<div class="card-media" style="background:' + iconBg(g.cat) + '" data-open="' + g.id + '">' +
+      '<div class="card-media" style="background:' + iconBg(mapGearCat(g)) + '" data-open="' + g.id + '">' +
         '<span class="card-emoji">' + esc(g.icon || '📦') + '</span>' +
         '<button class="heart ' + (g.fav ? 'on' : '') + '" data-fav="' + g.id + '">' + (g.fav ? '♥' : '♡') + '</button>' +
         (own ? '<span class="own-badge">已在资产</span>' : '') +
@@ -817,8 +977,8 @@
       '<div class="card-body">' +
         (g.brand ? '<div class="card-brand">' + esc(g.brand) + '</div>' : '') +
         '<h3 class="card-name" data-open="' + g.id + '">' + esc(g.name) + '</h3>' +
-        '<div class="card-badges">' + (g.tags || []).slice(0, 3).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' +
-        '<div class="card-foot"><span class="price">' + CUR +  money2(g.refPrice) + '</span>' +
+        '<div class="card-badges">' + (g.tags || []).slice(0, 2).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' +
+        '<div class="card-foot"><span class="price">' + CUR +  money2(gearPrice(g)) + '</span>' +
           (own ? '<span class="own-tag">' + (oc.perUse == null ? oc.days + '天' : '' + CUR +  money(oc.perUse) + '/次') + '</span>'
                : (w ? '<span class="card-w">' + w + '</span>' : '')) +
         '</div>' +
@@ -834,24 +994,21 @@
       '<span class="gt-name">' + esc(g.name) + '</span>' +
       '<span class="gt-w">' + w + '</span>' +
       '<span class="gt-sub">' + esc(gearMeta(g)) + '</span>' +
-      '<span class="gt-p">' + CUR +  money2(g.refPrice) + '</span>' +
+      '<span class="gt-p">' + CUR +  money2(gearPrice(g)) + '</span>' +
     '</div>';
   }
 
   function gearListHtml(g) {
     var w = fmtWeight(gearWeight(g));
     return '<div class="g-list" data-open="' + g.id + '">' +
-      '<span class="gl-ico" style="background:' + iconBg(g.cat) + '">' + esc(g.icon || '📦') + '</span>' +
+      '<span class="gl-ico" style="background:' + iconBg(mapGearCat(g)) + '">' + esc(g.icon || '📦') + '</span>' +
       '<span class="gl-main"><b>' + esc(g.name) + '</b><small>' + esc(gearMeta(g)) + '</small></span>' +
-      '<span class="gl-side"><b>' + CUR +  money2(g.refPrice) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
+      '<span class="gl-side"><b>' + CUR +  money2(gearPrice(g)) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
     '</div>';
   }
 
   function renderGear() {
     var cats = ['全部'].concat(GEAR_CATS);
-    DB.gear.forEach(function (g) {
-      if (!g.deleted && g.cat && cats.indexOf(g.cat) < 0) cats.push(g.cat);
-    });
     renderChips($('#gear-chips'), cats.map(function (c) {
       return '<button class="chip ' + (state.gearCat === c ? 'on' : '') + '" data-gcat="' + c + '">' + c + '</button>';
     }).join(''));
@@ -862,7 +1019,7 @@
     /* 按分类分组，组顺序与 chips 一致 */
     var groups = {}, order = [];
     list.forEach(function (g) {
-      var k = g.cat || '其他';
+      var k = mapGearCat(g);
       if (!groups[k]) { groups[k] = []; order.push(k); }
       groups[k].push(g);
     });
@@ -880,7 +1037,7 @@
     box.innerHTML = order.map(function (k) {
       var items = groups[k], sum = 0, wsum = 0, hasW = false;
       items.forEach(function (g) {
-        sum += Number(g.refPrice) || 0;
+        sum += gearPrice(g);
         var w = gearWeight(g);
         if (w) { wsum += w; hasW = true; }
       });
@@ -955,7 +1112,7 @@
     var html =
       '<div class="fgroup"><h4>品牌</h4><div class="fchips">' + chips('data-gfbrand', state.gearBrand, brands) + '</div></div>' +
       '<div class="fgroup"><h4>装备类型</h4><div class="fchips">' + chips('data-gftype', state.gearType, types) + '</div></div>' +
-      '<div class="fgroup"><h4>参考价（' + CUR + '）</h4><div class="fchips">' +
+      '<div class="fgroup"><h4>价格（' + CUR + '）</h4><div class="fchips">' +
         PRICE_RANGES.map(function (p) {
           return '<button class="chip ' + (state.gearPrice === p.k ? 'on' : '') + '" data-gfprice="' + p.k + '">' + p.label + '</button>';
         }).join('') +
@@ -1002,18 +1159,24 @@
       '</div>';
     }
 
-    var gcat = [g.type, g.cat].filter(function (x) { return !!x; }).join(' · ');
+    var gcat = [g.type, mapGearCat(g)].filter(function (x) { return !!x; }).join(' · ');
     var tagBlock = (g.tags || []).length
       ? '<div class="g-chips">' + g.tags.map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>'
       : '';
     var specBlock = specs ? '<div class="g-block"><h3>核心信息</h3><div class="spec-grid">' + specs + '</div></div>' : '';
     var perfBlock = perf ? '<div class="g-block"><h3>核心性能</h3>' + perf + '</div>' : '';
 
+    // 已加入资产：主价格显示实付价，下面补一行参考价，方便对照
+    var refLine = own && Number(g.refPrice) > 0
+      ? '<div class="g-price-sub">参考价 ' + CUR +  money2(g.refPrice) + '</div>'
+      : '';
+
     $('#gdetail-body').innerHTML =
       '<div class="g-hero">' +
         (gcat ? '<div class="g-cat">' + esc(gcat) + '</div>' : '') +
         '<h2 class="g-name">' + esc(g.name) + '</h2>' +
-        '<div class="g-price">' + CUR +  money2(g.refPrice) + '<small>参考价</small></div>' +
+        '<div class="g-price">' + CUR +  money2(gearPrice(g)) + '<small>' + (own ? '实付价' : '参考价') + '</small></div>' +
+        refLine +
         tagBlock +
       '</div>' +
       specBlock + perfBlock +
@@ -1070,12 +1233,12 @@
     f.elements.brand.value = d.brand || '';
     f.elements.type.value = d.type || '';
     f.elements.refPrice.value = d.refPrice != null ? d.refPrice : '';
+    f.elements.weight.value = d.weight ? d.weight : '';
 
     var catSel = f.elements.cat;
-    var cats = GEAR_CATS.slice();
-    if (d.cat && cats.indexOf(d.cat) < 0) cats.push(d.cat);
-    catSel.innerHTML = cats.map(function (c) { return '<option>' + c + '</option>'; }).join('');
-    catSel.value = d.cat || '户外';
+    catSel.innerHTML = GEAR_CATS.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+    catSel.value = GEAR_CATS.indexOf(d.cat) >= 0 ? d.cat
+      : (d.cat ? mapGearCat(d) : GEAR_CATS[0]);
 
     f.elements.fav.checked = !!d.fav;
     f.elements.tags.value = (d.tags || []).join(', ');
@@ -1097,6 +1260,7 @@
       cat: el.cat.value,
       type: el.type.value.trim(),
       refPrice: Number(el.refPrice.value) || 0,
+      weight: Number(el.weight.value) || 0,
       icon: state.gearFormIcon,
       fav: el.fav.checked,
       tags: parseTags(el.tags.value),
@@ -1113,22 +1277,51 @@
     } else {
       DB.gear.unshift(gear);
     }
+    // 已加入资产的装备：共享字段同步回资产
+    syncItemFromGear(gear);
     saveAll();
     closeSheet('#geditor-sheet');
     renderGear();
+    renderAssets();
     toast(idx >= 0 ? '装备已更新' : '装备已添加');
   }
 
   function deleteGear() {
     var g = DB.gear.find(function (x) { return x.id === state.editingGearId; });
     if (!g) return;
-    if (!confirm('删除「' + g.name + '」？已加入资产的记录会保留，只是不再显示它的参数。')) return;
+    var own = ownedItem(g.id);
+    var msg = own
+      ? '删除「' + g.name + '」？\n资产里的这条记录也会一起删除。\n只想移出资产、保留资料卡，请先在资产详情里点「移出资产」。'
+      : '删除「' + g.name + '」？';
+    if (!confirm(msg)) return;
+    var now = Date.now();
     g.deleted = true;
-    g.updatedAt = Date.now();
+    g.updatedAt = now;
+    if (own) {
+      own.deleted = true;
+      own.catalogId = null;
+      own.updatedAt = now;
+    }
     saveAll();
     closeSheet('#geditor-sheet');
     renderGear();
-    toast('已删除装备');
+    renderAssets();
+    toast(own ? '已删除，资产里的记录也一并移除' : '已删除装备');
+  }
+
+  /* 移出资产：删掉资产这条记录并解除关联，装备库资料卡保留 */
+  function removeFromAssets(id) {
+    var it = DB.items.find(function (x) { return x.id === id; });
+    if (!it || !it.catalogId) return;
+    if (!confirm('把「' + it.name + '」移出资产？\n装备库里的资料卡会保留，之后两侧不再同步。')) return;
+    it.deleted = true;
+    it.catalogId = null;
+    it.updatedAt = Date.now();
+    saveAll();
+    closeSheet('#detail-sheet');
+    renderAssets();
+    renderGear();
+    toast('已移出资产，资料卡保留');
   }
 
   /* =========================================================
@@ -1380,8 +1573,8 @@
     { id: 'price', name: '仅价格' }
   ];
   var CAT_COLORS = {
-    '户外': '#4354f0', '睡眠': '#7c5cf0', '背负': '#0e9f6e', '鞋靴': '#e8602f',
-    '照明': '#f5a524', '炊具': '#0ea5e9', '其他': '#8b90a0'
+    '背负': '#4354f0', '穿着': '#e8602f', '鞋袜': '#0e9f6e', '睡眠': '#7c5cf0',
+    '饮食': '#f5a524', '行进': '#0ea5e9', '安全': '#e5484d', '数码': '#8b5cf6'
   };
   var POSTER_SANS = '"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif';
 
@@ -1399,7 +1592,7 @@
     var list = DB.gear.filter(function (g) { return !g.deleted; });
     var groups = {}, order = [];
     list.forEach(function (g) {
-      var k = g.cat || '其他';
+      var k = mapGearCat(g);
       if (!groups[k]) { groups[k] = []; order.push(k); }
       groups[k].push(g);
     });
@@ -1412,7 +1605,7 @@
     var totalW = 0, totalP = 0;
     list.forEach(function (g) {
       totalW += gearWeight(g);
-      totalP += Number(g.refPrice) || 0;
+      totalP += gearPrice(g);
     });
     return { groups: groups, order: order, totalW: totalW, totalP: totalP, count: list.length };
   }
@@ -1654,8 +1847,9 @@
           var wt = fmtWeight(gearWeight(item));
           if (wt) bits.push(wt);
         }
-        if (poster.content !== 'weight' && item.refPrice) {
-          bits.push(CUR + money2(item.refPrice));
+        if (poster.content !== 'weight') {
+          var gp = gearPrice(item);
+          if (gp) bits.push(CUR + money2(gp));
         }
         g.textAlign = 'right';
         g.fillStyle = st === 'wild' ? 'rgba(255,255,255,.82)' : '#5d6272';
@@ -2061,6 +2255,7 @@
 
       DB.items = mergeById(DB.items, items);
       DB.gear = mergeById(DB.gear, gear);
+      normalizeGearData(DB.gear, DB.items);
       saveAll();
       renderAssets(); renderGear(); renderStats();
       toast('已导入备份：物品 ' + items.length + ' 条，装备 ' + gear.length + ' 件');
@@ -2133,9 +2328,21 @@
     var tab = el.closest('[data-tab]');
     if (tab) { switchTab(tab.getAttribute('data-tab')); return; }
 
-    // 状态 tab
-    var st = el.closest('[data-state]');
-    if (st) { state.status = st.getAttribute('data-state'); renderAssets(); return; }
+    // 筛选弹层：使用状态 / 分类
+    var afst = el.closest('[data-afstatus]');
+    if (afst) {
+      state.status = afst.getAttribute('data-afstatus');
+      renderAssetFilter();
+      renderAssets();
+      return;
+    }
+    var afcat = el.closest('[data-afcat2]');
+    if (afcat) {
+      state.cat = afcat.getAttribute('data-afcat2');
+      renderAssetFilter();
+      renderAssets();
+      return;
+    }
 
     // 空状态：一键回到全部
     if (el.closest('#asset-empty-reset')) {
@@ -2231,12 +2438,23 @@
         closeSheet('#gsheet');
         openEditor(null, {
           name: gear.name,
-          cat: CATS.indexOf(gear.cat) >= 0 ? gear.cat : '户外',
-          price: gear.refPrice,
+          cat: mapGearCat(gear) === '数码' ? '数码' : '户外',
+          gearCat: mapGearCat(gear),
+          weight: Number(gear.weight) || gearWeight(gear),
+          officialPrice: Number(gear.refPrice) || 0,
+          price: '',
           icon: gear.icon,
           catalogId: gear.id
         });
       }
+      return;
+    }
+
+    // 移出资产：只解除关联，装备库资料卡保留
+    var unlink = el.closest('[data-unlink]');
+    if (unlink) {
+      ev.stopPropagation();
+      removeFromAssets(unlink.getAttribute('data-unlink'));
       return;
     }
 
@@ -2386,6 +2604,7 @@
           });
           DB.items = keepItems.concat(freshItems);
           DB.gear = keepGear.concat(freshGear);
+          normalizeGearData(DB.gear, DB.items);
           resetGearFilters();
           saveAll();
           renderAssets(); renderGear(); renderStats();
@@ -2458,6 +2677,19 @@
   // 顶部齿轮
   $('#btn-more').addEventListener('click', openMenu);
 
+  // 资产筛选
+  $('#btn-afilter').addEventListener('click', openAssetFilter);
+  $('#btn-afilter-apply').addEventListener('click', function () {
+    closeSheet('#afilter-sheet');
+    renderAssets();
+  });
+  $('#btn-afilter-reset').addEventListener('click', function () {
+    state.status = '全部';
+    state.cat = '全部分类';
+    renderAssetFilter();
+    renderAssets();
+  });
+
   // 新增
   $('#btn-new').addEventListener('click', function () { openEditor(null, null); });
   $('#btn-g-new').addEventListener('click', function () { openGearEditor(null); });
@@ -2476,11 +2708,20 @@
   $('#btn-del').addEventListener('click', function () {
     var it = DB.items.find(function (x) { return x.id === state.detailId; });
     if (!it) return;
-    if (confirm('删除「' + it.name + '」？')) {
-      it.deleted = true;
-      it.updatedAt = Date.now();
-      saveAll(); closeSheet('#detail-sheet'); renderAssets(); toast('已删除');
-    }
+    var linkedGear = it.catalogId
+      ? DB.gear.find(function (g) { return g.id === it.catalogId && !g.deleted; })
+      : null;
+    var msg = linkedGear
+      ? '删除「' + it.name + '」？\n装备库里的对应资料卡也会一起删除。\n只想移出资产、保留资料卡，请点「移出资产」。'
+      : '删除「' + it.name + '」？';
+    if (!confirm(msg)) return;
+    var now = Date.now();
+    it.deleted = true;
+    it.catalogId = null;
+    it.updatedAt = now;
+    if (linkedGear) { linkedGear.deleted = true; linkedGear.updatedAt = now; }
+    saveAll(); closeSheet('#detail-sheet'); renderAssets(); renderGear();
+    toast(linkedGear ? '已删除，装备库资料卡也一并移除' : '已删除');
   });
 
   // 表单
