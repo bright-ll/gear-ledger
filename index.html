@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>我的物品 · 日均成本台账</title>
-<link rel="stylesheet" href="styles.css?v=22">
+<link rel="stylesheet" href="styles.css?v=23">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -33,6 +33,7 @@
       <div class="hero-top">
         <span class="hero-title" id="hero-title">全部物品</span>
         <button class="hero-search" id="btn-search" title="搜索">🔍</button>
+        <span class="hero-grow"></span>
         <div class="viewswitch" id="asset-viewswitch">
           <button class="vsw" data-aview="text" title="文字视图" aria-label="文字视图">
             <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
@@ -44,13 +45,6 @@
             <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1"/></svg>
           </button>
         </div>
-        <span class="hero-grow"></span>
-        <select class="hero-sort" id="sort-select">
-          <option value="date">默认</option>
-          <option value="daily">按日均</option>
-          <option value="price">按价格</option>
-          <option value="days">按天数</option>
-        </select>
       </div>
       <div class="hero-stats">
         <div class="hs">
@@ -336,6 +330,10 @@
         </div>
         <div class="icon-picker hidden" id="icon-picker"></div>
 
+        <label class="row col"><span>标签</span>
+          <input name="tags" placeholder="用逗号隔开，例如：GORE-TEX, 防水, 轻量">
+        </label>
+
         <label class="row"><span>价格</span><input type="number" name="price" step="0.01" min="0" placeholder="填写实际到手价" inputmode="decimal"></label>
         <label class="row"><span>参考价</span><input type="number" name="officialPrice" step="0.01" min="0" placeholder="选填，和装备库同步" inputmode="decimal"></label>
         <label class="row"><span>数量</span><input type="number" name="qty" step="1" min="1" value="1" inputmode="numeric"></label>
@@ -495,11 +493,11 @@
 <!-- ================= 通用图标选择 ================= -->
 <div class="toast" id="toast"></div>
 
-<script src="config.js?v=22"></script>
-<script src="cloud.js?v=22"></script>
-<script src="icons.js?v=22"></script>
-<script src="icons3d.js?v=22"></script>
-<script src="app.js?v=22"></script>
+<script src="config.js?v=23"></script>
+<script src="cloud.js?v=23"></script>
+<script src="icons.js?v=23"></script>
+<script src="icons3d.js?v=23"></script>
+<script src="app.js?v=23"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {

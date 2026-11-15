@@ -335,6 +335,19 @@
 
   if (normalizeGearData(DB.gear, DB.items)) saveAll();
 
+  /* 旧数据补齐 tags：已关联装备的从装备库带过来，其他给空数组 */
+  var tagsMigrated = false;
+  DB.items.forEach(function (it) {
+    if (!it.tags) {
+      var linkedGear = it.catalogId
+        ? DB.gear.find(function (g) { return g.id === it.catalogId && !g.deleted; })
+        : null;
+      it.tags = linkedGear && linkedGear.tags ? linkedGear.tags.slice() : [];
+      tagsMigrated = true;
+    }
+  });
+  if (tagsMigrated) saveAll();
+
   var state = {
     tab: 'assets',
     status: '全部',
@@ -546,9 +559,13 @@
     var catHtml = ['全部分类'].concat(CATS).map(function (c) {
       return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-afcat2="' + esc(c) + '">' + esc(c) + '</button>';
     }).join('');
+    var sortHtml = [['date', '默认'], ['daily', '按日均'], ['price', '按价格'], ['days', '按天数']].map(function (o) {
+      return '<button class="chip ' + (state.sort === o[0] ? 'on' : '') + '" data-afsort="' + o[0] + '">' + o[1] + '</button>';
+    }).join('');
     body.innerHTML =
       '<div class="fgroup"><h4>使用状态</h4><div class="fchips">' + statusHtml + '</div></div>' +
-      '<div class="fgroup"><h4>分类</h4><div class="fchips">' + catHtml + '</div></div>';
+      '<div class="fgroup"><h4>分类</h4><div class="fchips">' + catHtml + '</div></div>' +
+      '<div class="fgroup"><h4>排序</h4><div class="fchips">' + sortHtml + '</div></div>';
     var apply = $('#btn-afilter-apply');
     if (apply) apply.textContent = '查看 ' + filteredItems().length + ' 件';
     updateAssetFilterBtn();
@@ -856,12 +873,16 @@
       ? '<div class="unlink-wrap"><button class="btn-main ghost" data-unlink="' + it.id + '">移出资产（保留装备库资料）</button></div>'
       : '';
 
+    var tagBlock = (it.tags || []).length
+      ? '<div class="detail-tags">' + it.tags.map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>'
+      : '';
+
     $('#detail-body').innerHTML =
       (it.photo ? '<div class="detail-photo"><img src="' + esc(it.photo) + '" alt="' + esc(it.name) + '"></div>' : '') +
       '<div class="detail-icon" style="background:' + iconBg(it.cat) + '">' + iconMarkup(it.iconImg || it.icon) + '</div>' +
       '<div class="detail-card"><div class="detail-grid">' + grid + '</div></div>' +
       '<div class="detail-card"><div class="detail-grid">' + grid2 + '</div></div>' +
-      useBlock + gearBlock + unlinkBlock + noteBlock + '<div style="height:8px"></div>';
+      tagBlock + useBlock + gearBlock + unlinkBlock + noteBlock + '<div style="height:8px"></div>';
 
     openSheet('#detail-sheet');
   }
@@ -888,6 +909,7 @@
     f.elements.price.value = d.price != null ? d.price : '';
     f.elements.qty.value = d.qty != null ? d.qty : 1;
     f.elements.extra.value = d.extra != null ? d.extra : 0;
+    f.elements.tags.value = (d.tags || []).join(', ');
     f.elements.lifeValue.value = d.lifeValue || '';
     f.elements.lifeUnit.value = d.lifeUnit || '年';
     f.elements.hasExpiry.checked = !!d.hasExpiry;
@@ -944,6 +966,7 @@
     if (item.icon) g.icon = item.icon;
     g.iconImg = item.iconImg || null;
     g.photo = item.photo || null;
+    g.tags = (item.tags || []).slice();
     g.updatedAt = Date.now();
   }
 
@@ -958,6 +981,7 @@
     if (gear.icon) it.icon = gear.icon;
     it.iconImg = gear.iconImg || null;
     it.photo = gear.photo || null;
+    it.tags = (gear.tags || []).slice();
     it.updatedAt = Date.now();
   }
 
@@ -997,6 +1021,7 @@
       baseCount: Number(el.baseCount.value) || 0,
       catalogId: state.editingCatalogId || null,
       useLog: [],
+      tags: parseTags(el.tags.value),
       notes: el.notes.value.trim(),
       updatedAt: Date.now(),
       deleted: false
@@ -2670,6 +2695,13 @@
       renderAssets();
       return;
     }
+    var afsort = el.closest('[data-afsort]');
+    if (afsort) {
+      state.sort = afsort.getAttribute('data-afsort');
+      renderAssetFilter();
+      renderAssets();
+      return;
+    }
 
     // 空状态：一键回到全部
     if (el.closest('#asset-empty-reset')) {
@@ -2773,6 +2805,7 @@
           icon: gear.icon,
           iconImg: gear.iconImg || null,
           photo: gear.photo || null,
+          tags: (gear.tags || []).slice(),
           catalogId: gear.id
         });
       }
@@ -3093,12 +3126,6 @@
 
   // 表单
   $('#editor-form').addEventListener('submit', saveEditor);
-
-  // 排序
-  $('#sort-select').addEventListener('change', function (e) {
-    state.sort = e.target.value;
-    renderAssets();
-  });
 
   // 搜索
   $('#q').addEventListener('input', function (e) {
