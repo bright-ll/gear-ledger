@@ -1330,53 +1330,205 @@
   function renderStats() {
     var items = DB.items.filter(function (x) { return !x.deleted; })
       .map(function (it) { return { it: it, c: calc(it) }; });
+
+    if (!items.length) {
+      $('#stats-body').innerHTML =
+        '<div class="st-empty-card"><div class="st-empty-ico">📊</div>' +
+          '<p>还没有可以分析的物品</p>' +
+          '<span>先在「资产」里记下第一件，图表会自动生成</span>' +
+        '</div>';
+      return;
+    }
+
     var total = 0, daily = 0, count = 0, usedTotal = 0, costForUse = 0;
-    var byCat = {};
-    var overdue = [];
+    var byCat = {}, catQty = {};
+    var overdue = [], perUse = [], lifeRows = [];
 
     items.forEach(function (x) {
       var qty = Number(x.it.qty) || 1;
+      var cat = x.it.cat || '其他';
       total += x.c.net;
       daily += x.c.daily;
       count += qty;
-      if (x.c.perUse != null) { usedTotal += x.c.used; costForUse += x.c.net; }
-      byCat[x.it.cat] = (byCat[x.it.cat] || 0) + x.c.net;
+      if (x.c.perUse != null) { usedTotal += x.c.used; costForUse += x.c.net; perUse.push(x); }
+      byCat[cat] = (byCat[cat] || 0) + x.c.net;
+      catQty[cat] = (catQty[cat] || 0) + qty;
       if (x.c.overdue) overdue.push(x);
+      if (x.c.life > 0) lifeRows.push(x);
     });
 
     var avgPerUse = usedTotal ? costForUse / usedTotal : null;
 
-    var catRows = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; });
-    var maxCat = catRows.length ? byCat[catRows[0]] : 1;
-    var bars = catRows.map(function (c) {
-      var pct = Math.round(byCat[c] / maxCat * 100);
-      return '<div><div class="bar-top"><b>' + esc(c) + '</b><span>' + CUR +  money(byCat[c]) + '</span></div>' +
-             '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>';
+    /* 固定分类用固定色，自定义分类按名称散列，避免每次刷新换颜色 */
+    var CAT_COLOR = {
+      '户外': 0, '背负': 0, '行进': 0, '穿着': 0,
+      '数码': 1, '家电': 2, '鞋袜': 2,
+      '生活用品': 3, '饮食': 3,
+      '家具': 4, '睡眠': 4,
+      '安全': 5, '其他': 6
+    };
+    function colorIdx(name) {
+      if (Object.prototype.hasOwnProperty.call(CAT_COLOR, name)) return CAT_COLOR[name];
+      var h = 0;
+      for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 7;
+      return h;
+    }
+
+    var catRows = Object.keys(byCat).filter(function (c) { return byCat[c] > 0; })
+      .sort(function (a, b) { return byCat[b] - byCat[a]; })
+      .map(function (c) {
+        return { name: c, amount: byCat[c], qty: catQty[c] || 0, ci: colorIdx(c) };
+      });
+
+    var CIRC = 389.56, acc = 0;
+    var segHtml = catRows.map(function (r) {
+      var len = total ? r.amount / total * CIRC : 0;
+      var one = '<circle class="st-seg cc' + r.ci + '" cx="80" cy="80" r="62" stroke-dasharray="' +
+        len.toFixed(2) + ' ' + CIRC + '" stroke-dashoffset="' + (-acc).toFixed(2) + '"></circle>';
+      acc += len;
+      return one;
     }).join('');
 
-    var top = items.filter(function (x) { return x.c.perUse != null; })
-      .sort(function (a, b) { return b.c.perUse - a.c.perUse; }).slice(0, 5);
-    var maxPU = top.length ? top[0].c.perUse : 1;
-    var topBars = top.map(function (x) {
-      var pct = Math.round(x.c.perUse / maxPU * 100);
-      return '<div><div class="bar-top"><b>' + esc(x.it.name) + '</b><span>' + CUR +  money(x.c.perUse) + '/次</span></div>' +
-             '<div class="bar-track"><div class="bar-fill warn" style="width:' + pct + '%"></div></div></div>';
-    }).join('') || '<div style="font-size:13px;color:#a0a5b3">还没有开启「计算单次使用」的物品</div>';
+    var top = catRows[0];
+    var topPct = top && total ? Math.round(top.amount / total * 100) : 0;
+    var donutHtml =
+      '<div class="st-donut-wrap">' +
+        '<svg class="st-donut" viewBox="0 0 160 160">' +
+          '<circle class="st-ring" cx="80" cy="80" r="62"></circle>' + segHtml +
+        '</svg>' +
+        '<div class="st-dc"><b>' + (top ? topPct + '%' : '0%') + '</b><span>' +
+          (top ? esc(top.name) : '暂无数据') + '</span></div>' +
+      '</div>';
 
-    var overdueList = overdue.map(function (x) {
-      return '<div class="kv"><span>' + esc(x.it.name) + '</span><b style="color:#f04438">超 ' + (x.c.days - x.c.life) + ' 天</b></div>';
-    }).join('') || '<div style="font-size:13px;color:#a0a5b3">没有超期物品，保养得不错</div>';
+    var legendHtml = catRows.map(function (r) {
+      var raw = total ? r.amount / total * 100 : 0;
+      var ptxt = raw >= 0.1 ? raw.toFixed(1) + '%' : (raw > 0 ? '<0.1%' : '0.0%');
+      return '<li class="cc' + r.ci + '"><i></i><div><b>' + esc(r.name) + '</b><span>' +
+        CUR + money(r.amount) + ' · ' + ptxt + '</span></div></li>';
+    }).join('');
+
+    var catGridHtml = catRows.map(function (r) {
+      var pct = total ? r.amount / total * 100 : 0;
+      var ptxt;
+      if (pct >= 10) ptxt = Math.round(pct) + '%';
+      else if (pct >= 0.1) ptxt = (Math.round(pct * 10) / 10) + '%';
+      else if (pct > 0) ptxt = '<0.1%';
+      else ptxt = '0%';
+      return '<div class="st-cat cc' + r.ci + '">' +
+        '<div class="st-cat-pct">' + ptxt + '</div>' +
+        '<b>' + esc(r.name) + '</b>' +
+        '<span>' + r.qty + ' 件 · ' + CUR + money(r.amount) + '</span>' +
+      '</div>';
+    }).join('');
+
+    var pu = perUse.slice().sort(function (a, b) { return a.c.perUse - b.c.perUse; });
+    var vsHtml;
+    function vsRows(list) {
+      return list.map(function (x) {
+        return '<div class="st-vs-row"><span>' + esc(x.it.name) + '</span><b>' +
+          CUR + money(x.c.perUse) + '</b></div>';
+      }).join('');
+    }
+    if (pu.length >= 2) {
+      var n = Math.min(3, Math.floor(pu.length / 2));
+      var cheap = pu.slice(0, n);
+      var exp = pu.slice(pu.length - n).reverse();
+      vsHtml = '<div class="st-vs">' +
+        '<div class="st-vs-col"><div class="st-vs-head"><i></i>最划算</div>' + vsRows(cheap) + '</div>' +
+        '<div class="st-vs-col bad"><div class="st-vs-head"><i></i>最烧钱</div>' + vsRows(exp) + '</div>' +
+      '</div>';
+    } else {
+      vsHtml = '<div class="st-empty">开启至少 2 件物品的「计算单次使用」，才能做对比</div>';
+    }
+
+    lifeRows.sort(function (a, b) {
+      if (a.c.overdue !== b.c.overdue) return a.c.overdue ? -1 : 1;
+      return (b.c.days / b.c.life) - (a.c.days / a.c.life);
+    });
+
+    function leftText(d) {
+      if (d >= 365) {
+        var y = d / 365;
+        return (y >= 10 ? Math.round(y) : Math.round(y * 10) / 10) + ' 年';
+      }
+      if (d >= 30) return Math.round(d / 30) + ' 个月';
+      return d + ' 天';
+    }
+
+    var lifeShown = lifeRows.slice(0, 6);
+    var lifeHtml = lifeShown.map(function (x) {
+      var it = x.it, c = x.c;
+      var pct = Math.min(100, Math.round(c.days / c.life * 100));
+      var left = c.life - c.days;
+      var fillCls = 'st-life-fill', chipCls = 'st-life-chip', chip;
+      if (c.overdue) {
+        fillCls += ' over';
+        chipCls += ' bad';
+        chip = '超 ' + money2(c.days - c.life) + ' 天';
+      } else if (left <= 0) {
+        chip = '已满计划';
+      } else if (left <= 90) {
+        fillCls += ' warn';
+        chipCls += ' warn';
+        chip = '剩 ' + leftText(left);
+      } else {
+        chipCls += ' ok';
+        chip = '剩 ' + leftText(left);
+      }
+      var plan = it.lifeValue + ' ' + (it.lifeUnit || '天');
+      return '<div class="st-life-row">' +
+        '<div class="st-life-ic" style="background:' + iconBg(it.cat) + '">' + esc(it.icon || '📦') + '</div>' +
+        '<div class="st-life-body">' +
+          '<div class="st-life-top"><b>' + esc(it.name) + '</b><span class="' + chipCls + '">' + chip + '</span></div>' +
+          '<div class="st-life-track"><i class="' + fillCls + '" style="width:' + pct + '%"></i></div>' +
+          '<div class="st-life-meta"><span>已持有 ' + money2(c.days) + ' 天</span><span>计划 ' + esc(plan) + '</span></div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    if (!lifeHtml) {
+      lifeHtml = '<div class="st-empty">给物品填上「计划用多久」，这里会显示寿命进度</div>';
+    } else if (lifeRows.length > lifeShown.length) {
+      lifeHtml += '<div class="st-more">还有 ' + (lifeRows.length - lifeShown.length) + ' 件寿命计划未展示</div>';
+    }
+
+    var lifeChip = overdue.length
+      ? '<span class="st-chip bad">' + overdue.length + ' 件超期</span>'
+      : '<span class="st-chip">' + lifeRows.length + ' 件有年限</span>';
+
+    var totalTxt = money(total);
+    var dot = totalTxt.lastIndexOf('.');
+    var heroMain = totalTxt.slice(0, dot);
+    var heroDec = totalTxt.slice(dot);
 
     $('#stats-body').innerHTML =
-      '<div class="panel"><h3>总览</h3><p class="sub">按当前全部物品计算</p>' +
-        '<div class="kv"><span>资产总计</span><b>' + CUR +  money(total) + '</b></div>' +
-        '<div class="kv"><span>总日均</span><b>' + CUR +  money(daily) + '/天</b></div>' +
-        '<div class="kv"><span>物品数量</span><b>' + count + ' 件</b></div>' +
-        '<div class="kv"><span>整体次均成本</span><b>' + (avgPerUse == null ? '无' : '' + CUR +  money(avgPerUse)) + '</b></div>' +
+      '<div class="st-hero">' +
+        '<div class="st-hero-blob"></div>' +
+        '<div class="st-hero-top"><span>资产总计</span><span class="st-hero-tag">' + count + ' 件</span></div>' +
+        '<div class="st-hero-num">' + CUR + heroMain + '<small>' + heroDec + '</small></div>' +
+        '<div class="st-hero-grid">' +
+          '<div><b>' + CUR + money(daily) + '</b><span>总日均 / 天</span></div>' +
+          '<div><b>' + (avgPerUse == null ? '—' : CUR + money(avgPerUse)) + '</b><span>整体次均</span></div>' +
+          '<div><b>' + overdue.length + ' 件</b><span>超期物品</span></div>' +
+        '</div>' +
       '</div>' +
-      '<div class="panel"><h3>分类占比</h3><p class="sub">按金额（已扣二手价值）</p><div class="bars">' + bars + '</div></div>' +
-      '<div class="panel"><h3>单次成本 TOP 5</h3><p class="sub">越高说明越贵、用得越少</p><div class="bars">' + topBars + '</div></div>' +
-      '<div class="panel"><h3>超期提醒</h3><p class="sub">超过计划使用年限</p>' + overdueList + '</div>' +
+      '<div class="panel">' +
+        '<h3>分类占比</h3><p class="sub">按金额（已扣二手价值）</p>' +
+        '<div class="st-donut-row">' + donutHtml + '<ul class="st-legend">' + legendHtml + '</ul></div>' +
+      '</div>' +
+      '<div class="panel">' +
+        '<h3>分类明细</h3><p class="sub">金额、件数一眼对比</p>' +
+        '<div class="st-cat-grid">' + catGridHtml + '</div>' +
+      '</div>' +
+      '<div class="panel st-panel-vs">' +
+        '<h3>最划算 / 最烧钱</h3><p class="sub">按单次使用成本排 · 越少越划算</p>' +
+        vsHtml +
+      '</div>' +
+      '<div class="panel st-panel-life">' +
+        '<div class="st-head"><div><h3>寿命进度</h3><p class="sub">已持有 / 计划使用年限，超期标红</p></div>' +
+          lifeChip + '</div>' +
+        lifeHtml +
+      '</div>' +
       '<div style="height:8px"></div>';
   }
 
