@@ -107,7 +107,7 @@
             description: '装备台账数据（勿删除）',
             public: false,
             files: (function () {
-              var f = {}; f[FILE_NAME] = { content: '{"items":[],"gear":[]}' }; return f;
+              var f = {}; f[FILE_NAME] = { content: '{"items":[],"gear":[],"trips":[],"tripGear":[],"usage":[],"templates":[]}' }; return f;
             })()
           })
         });
@@ -120,7 +120,7 @@
     read: async function (id) {
       var data = await gist.call('/gists/' + id);
       var file = data.files && data.files[FILE_NAME];
-      if (!file) return { items: [], gear: [] };
+      if (!file) return { items: [], gear: [], trips: [], tripGear: [], usage: [], templates: [] };
       var raw = file.content;
       if (file.truncated && file.raw_url) {
         var r = await fetch(file.raw_url, { headers: gist.headers(gist.token()) });
@@ -128,14 +128,22 @@
       }
       try {
         var obj = JSON.parse(raw);
-        return { items: obj.items || [], gear: obj.gear || [] };
+        return {
+          items: obj.items || [], gear: obj.gear || [],
+          trips: obj.trips || [], tripGear: obj.tripGear || [],
+          usage: obj.usage || [], templates: obj.templates || []
+        };
       } catch (e) {
-        return { items: [], gear: [] };
+        return { items: [], gear: [], trips: [], tripGear: [], usage: [], templates: [] };
       }
     },
 
     write: async function (id, data) {
-      var payload = { items: data.items, gear: data.gear, savedAt: Date.now() };
+      var payload = {
+        items: data.items, gear: data.gear, trips: data.trips,
+        tripGear: data.tripGear, usage: data.usage, templates: data.templates,
+        savedAt: Date.now()
+      };
       var files = {};
       files[FILE_NAME] = { content: JSON.stringify(payload) };
       await gist.call('/gists/' + id, {
@@ -179,7 +187,11 @@
       var remote = await gist.read(id);
       var merged = {
         items: merge(real(DB.items), real(remote.items)),
-        gear: merge(real(DB.gear), real(remote.gear))
+        gear: merge(real(DB.gear), real(remote.gear)),
+        trips: merge(real(DB.trips), real(remote.trips)),
+        tripGear: merge(real(DB.tripGear), real(remote.tripGear)),
+        usage: merge(real(DB.usage), real(remote.usage)),
+        templates: merge(real(DB.templates), real(remote.templates))
       };
       await gist.write(id, merged);
       return merged;
@@ -191,7 +203,8 @@
      ========================================================= */
   var ENV = String(cfg.cloudbaseEnv || '').trim();
   var SDK_URL = cfg.sdkUrl || 'https://static.cloudbase.net/cloudbase-js-sdk/3.11.0/cloudbase.full.js';
-  var COLLECTIONS = ['items', 'gear'];
+  /* CloudBase 需要在控制台建好这些集合；缺集合时下面会跳过该集合，不影响 items/gear */
+  var COLLECTIONS = ['items', 'gear', 'trips', 'tripGear', 'usage', 'templates'];
   var app = null, auth = null, db = null, ready = false;
 
   function loadSDK() {
@@ -283,14 +296,24 @@
 
       var remote = {};
       for (var i = 0; i < COLLECTIONS.length; i++) {
-        remote[COLLECTIONS[i]] = await cloudbase.fetchAll(COLLECTIONS[i]);
+        try {
+          remote[COLLECTIONS[i]] = await cloudbase.fetchAll(COLLECTIONS[i]);
+        } catch (e) {
+          remote[COLLECTIONS[i]] = [];
+        }
       }
       var merged = {
-        items: merge(real(DB.items), real(remote.items.map(cloudbase.clean))),
-        gear: merge(real(DB.gear), real(remote.gear.map(cloudbase.clean)))
+        items: merge(real(DB.items), real((remote.items || []).map(cloudbase.clean))),
+        gear: merge(real(DB.gear), real((remote.gear || []).map(cloudbase.clean))),
+        trips: merge(real(DB.trips), real((remote.trips || []).map(cloudbase.clean))),
+        tripGear: merge(real(DB.tripGear), real((remote.tripGear || []).map(cloudbase.clean))),
+        usage: merge(real(DB.usage), real((remote.usage || []).map(cloudbase.clean))),
+        templates: merge(real(DB.templates), real((remote.templates || []).map(cloudbase.clean)))
       };
       for (var j = 0; j < COLLECTIONS.length; j++) {
-        await cloudbase.pushAll(COLLECTIONS[j], merged[COLLECTIONS[j]], remote[COLLECTIONS[j]]);
+        try {
+          await cloudbase.pushAll(COLLECTIONS[j], merged[COLLECTIONS[j]], remote[COLLECTIONS[j]] || []);
+        } catch (e) {}
       }
       return merged;
     },

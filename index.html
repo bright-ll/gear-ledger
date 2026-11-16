@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f5f6fa">
+<meta name="theme-color" content="#f7f1e3">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>我的物品 · 日均成本台账</title>
-<link rel="stylesheet" href="styles.css?v=23">
+<title>装备台账 · 山野手账</title>
+<link rel="stylesheet" href="styles.css?v=34">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -24,6 +24,7 @@
       <p class="sub">记录每件物品的日均成本和使用次数。</p>
       <div class="pagehead-actions">
         <span class="sync-dot" id="sync-dot" title="同步状态"></span>
+        <button class="head-add" id="btn-new-top" title="新增物品"><span class="ha-plus">+</span><span class="ha-label">新增</span></button>
         <button class="icon-btn" id="btn-more" title="更多">⚙</button>
       </div>
     </header>
@@ -48,12 +49,12 @@
       </div>
       <div class="hero-stats">
         <div class="hs">
-          <div class="hs-v" id="sum-total">0.00</div>
-          <div class="hs-k">资产总计(<span data-cur>¥</span>)</div>
+          <div class="hs-v" id="sum-total">0</div>
+          <div class="hs-k">资产总计</div>
         </div>
         <div class="hs">
-          <div class="hs-v" id="sum-daily">0.00</div>
-          <div class="hs-k">总日均(<span data-cur>¥</span>)</div>
+          <div class="hs-v" id="sum-daily">0</div>
+          <div class="hs-k">总日均</div>
         </div>
         <div class="hs">
           <div class="hs-v" id="sum-count">0</div>
@@ -87,6 +88,8 @@
         <button class="empty-reset hidden" id="asset-empty-reset">看全部物品</button>
       </div>
 
+      <div class="list-end hidden" id="asset-end"></div>
+
       <div class="dock">
         <button class="btn-main" id="btn-new">新增</button>
       </div>
@@ -101,7 +104,7 @@
       <div class="kicker">GEAR LIBRARY</div>
       <h1>装备库</h1>
       <p class="sub">看参数、比参考价，一键加入我的资产。</p>
-      <button class="icon-btn gear-add" id="btn-g-new-top" title="新增装备">+</button>
+      <button class="icon-btn gear-add" id="btn-g-new-top" title="新增装备"><span class="ga-plus">+</span><span class="ga-label">新增装备</span></button>
       <div class="gear-search">
         <div class="searchbar">
           <span>🔍</span>
@@ -131,9 +134,54 @@
         <p>没有匹配的装备</p>
       </div>
       <div class="note">装备可以点开编辑或删除，也可以新增自己的</div>
+      <div class="list-end hidden" id="gear-end"></div>
       <div class="dock">
         <button class="btn-main" id="btn-g-new">新增装备</button>
       </div>
+    </div>
+  </section>
+
+  <!-- ================= 行程 ================= -->
+  <section class="view hidden" id="view-trips">
+    <header class="pagehead">
+      <div class="kicker">TRIP LOG</div>
+      <h1>行程</h1>
+      <p class="sub">把装备带出门，回来算清每次出行。</p>
+      <button class="head-add" id="btn-trip-new-top" title="新建行程"><span class="ha-plus">+</span><span class="ha-label">新建行程</span></button>
+    </header>
+
+    <div class="trip-subtabs" id="trip-subtabs">
+      <button class="trip-subtab on" data-tripsub="trips">行程</button>
+      <button class="trip-subtab" data-tripsub="usage">使用记录</button>
+      <button class="trip-subtab" data-tripsub="templates">打包模板</button>
+    </div>
+
+    <div id="trip-panel-trips">
+      <div class="trip-tools">
+        <div class="chips scroll-x" id="trip-chips"></div>
+      </div>
+      <div class="trip-list" id="trip-list"></div>
+      <div class="empty hidden" id="trip-empty"></div>
+      <div class="dock"><button class="btn-main" id="btn-trip-new">新建行程</button></div>
+    </div>
+
+    <div id="trip-panel-usage" class="hidden">
+      <div class="trip-tools">
+        <div class="searchbar">
+          <span>🔍</span>
+          <input id="usage-q" type="search" placeholder="搜索装备、行程、备注" autocomplete="off">
+        </div>
+        <p class="trip-usage-summary" id="usage-summary"></p>
+        <div class="chips scroll-x" id="usage-chips"></div>
+      </div>
+      <div class="usage-list" id="usage-list"></div>
+      <div class="empty hidden" id="usage-empty"></div>
+    </div>
+
+    <div id="trip-panel-templates" class="hidden">
+      <div class="tpl-list" id="tpl-list"></div>
+      <div class="empty hidden" id="tpl-empty"></div>
+      <div class="dock"><button class="btn-main" id="btn-tpl-new">新建模板</button></div>
     </div>
   </section>
 
@@ -167,6 +215,10 @@
       <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
       <span>装备库</span>
     </button>
+    <button class="tab" data-tab="trips">
+      <svg viewBox="0 0 24 24"><path d="M4 6l6-2 4 2 6-2v14l-6 2-4-2-6 2z"/><path d="M10 4v14M14 6v14"/></svg>
+      <span>行程</span>
+    </button>
     <button class="tab" data-tab="stats">
       <svg viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>
       <span>分析</span>
@@ -184,10 +236,16 @@
     <div class="sheet-head">
       <button class="icon-btn" data-close>‹</button>
       <strong>详情</strong>
-      <button class="text-btn danger" id="btn-del">删除</button>
+      <span style="width:44px"></span>
     </div>
-    <div class="sheet-scroll" id="detail-body"></div>
-    <div class="dock">
+    <div class="sheet-scroll">
+      <div id="detail-body"></div>
+      <div class="danger-zone">
+        <button type="button" class="danger-link" id="btn-del">删除这件物品</button>
+      </div>
+    </div>
+    <div class="dock detail-dock">
+      <button class="btn-main ghost" id="btn-to-gear">加入装备库</button>
       <button class="btn-main" id="btn-edit">编辑</button>
     </div>
   </div>
@@ -212,7 +270,7 @@
     <div class="sheet-head geditor-head">
       <button class="icon-btn" data-close>‹</button>
       <strong id="geditor-title">新增装备</strong>
-      <button class="text-btn danger hidden" id="btn-gdel">删除</button>
+      <span style="width:44px"></span>
     </div>
     <form class="sheet-scroll" id="geditor-form" autocomplete="off">
       <div class="form-section">基本信息</div>
@@ -255,10 +313,38 @@
         </label>
       </div>
 
+      <div class="danger-zone hidden" id="geditor-danger">
+        <button type="button" class="danger-link" id="btn-gdel">删除资料卡</button>
+      </div>
+
       <div class="dock">
         <button type="submit" class="btn-main">保存</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ================= 装备删除确认 ================= -->
+<div class="sheet" id="gdelete-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>删除装备资料</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll">
+      <div class="gdelete-wrap">
+        <p class="gdelete-title" id="gdelete-name"></p>
+        <p class="gdelete-sub" id="gdelete-sub"></p>
+        <button type="button" class="gdelete-opt danger" id="gdelete-unlink">
+          <b>删除资料卡并解绑</b>
+          <small>资产记录会保留，只解除关联</small>
+        </button>
+      </div>
+    </div>
+    <div class="dock">
+      <button class="btn-main ghost" data-close>取消</button>
+    </div>
   </div>
 </div>
 
@@ -376,7 +462,6 @@
         <label class="row"><span>二手价值</span><input type="number" name="resale" step="0.01" min="0" placeholder="未填写" inputmode="decimal"></label>
 
         <label class="row"><span>计算单次使用</span><input type="checkbox" name="trackPerUse" class="switch"></label>
-        <label class="row"><span>已使用次数</span><input type="number" name="baseCount" step="1" min="0" value="0" placeholder="0" inputmode="numeric"></label>
       </div>
 
       <div class="form-card">
@@ -473,6 +558,231 @@
   </div>
 </div>
 
+<!-- ================= 行程新增/编辑 ================= -->
+<div class="sheet" id="trip-editor-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong id="trip-editor-title">新建行程</strong>
+      <span style="width:44px"></span>
+    </div>
+    <form class="sheet-scroll" id="trip-form" autocomplete="off">
+      <div class="form-section">基本信息</div>
+      <div class="form-card">
+        <label class="row"><span>名称</span><input name="name" required placeholder="例如：周末武功山"></label>
+        <label class="row"><span>出发日期</span><input type="date" name="startDate" required></label>
+        <label class="row"><span>返回日期</span><input type="date" name="endDate" required></label>
+        <label class="row"><span>行程类型</span><select name="type" id="trip-type"></select></label>
+        <label class="row"><span>状态</span><select name="status" id="trip-status"></select></label>
+        <label class="row"><span>同行人数</span><input type="number" name="companions" min="0" step="1" inputmode="numeric" placeholder="选填"></label>
+      </div>
+
+      <div class="form-section">路线与天气</div>
+      <div class="form-card">
+        <label class="row"><span>地点</span><input name="location" placeholder="选填"></label>
+        <label class="row col"><span>路线描述</span><textarea name="route" rows="2" placeholder="选填，例如：龙山村上山，金顶下撤"></textarea></label>
+        <label class="row"><span>天气</span><input name="weather" placeholder="选填，例如：多云 8–15℃"></label>
+      </div>
+
+      <div class="form-section">费用</div>
+      <div class="form-card">
+        <label class="row"><span>交通方式</span><input name="transport" placeholder="选填，例如：高铁+包车"></label>
+        <label class="row"><span>交通花费</span><input type="number" name="transportCost" min="0" step="0.01" inputmode="decimal" placeholder="0"></label>
+        <label class="row"><span>住宿方式</span><input name="lodging" placeholder="选填，例如：帐篷 / 客栈"></label>
+        <label class="row"><span>住宿花费</span><input type="number" name="lodgingCost" min="0" step="0.01" inputmode="decimal" placeholder="0"></label>
+        <label class="row"><span>其他花费</span><input type="number" name="otherCost" min="0" step="0.01" inputmode="decimal" placeholder="0"></label>
+      </div>
+
+      <div class="form-section" id="trip-template-sec">打包清单</div>
+      <div class="form-card" id="trip-template-card">
+        <label class="row"><span>保存后套用模板</span><input type="checkbox" name="applyTemplate" class="switch"></label>
+        <label class="row"><span>选择模板</span><select name="templateId" id="trip-template-select"></select></label>
+        <p class="form-tip" id="trip-template-tip"></p>
+      </div>
+
+      <div class="form-section">备注</div>
+      <div class="form-card">
+        <label class="row col"><span>备注</span><textarea name="notes" rows="3" placeholder="选填"></textarea></label>
+      </div>
+
+      <div class="dock">
+        <button type="submit" class="btn-main">保存行程</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 行程详情 ================= -->
+<div class="sheet" id="trip-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>行程详情</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll" id="trip-detail-body"></div>
+    <div class="dock trip-detail-dock">
+      <button class="btn-main ghost" id="trip-detail-edit">编辑</button>
+      <button class="btn-main" id="trip-detail-main">完成行程</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 完成确认 ================= -->
+<div class="sheet" id="trip-confirm-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>确认实际使用</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll">
+      <p class="confirm-sub" id="trip-confirm-sub"></p>
+      <div class="confirm-tools">
+        <button type="button" class="confirm-tool" data-confirm-batch="all">全部携带并使用</button>
+        <button type="button" class="confirm-tool" data-confirm-batch="carry">全部携带</button>
+        <button type="button" class="confirm-tool" data-confirm-batch="use">全部使用</button>
+        <button type="button" class="confirm-tool" data-confirm-batch="clear">全部清空</button>
+      </div>
+      <div id="trip-confirm-list"></div>
+      <p class="form-tip">勾选「使用」的装备会生成使用记录，并按次数计入单次成本。</p>
+      <div style="height:8px"></div>
+    </div>
+    <div class="dock">
+      <button class="btn-main" id="btn-trip-confirm">确认完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 补录使用记录 ================= -->
+<div class="sheet" id="usage-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong id="usage-title">补录使用记录</strong>
+      <span style="width:44px"></span>
+    </div>
+    <form class="sheet-scroll" id="usage-form" autocomplete="off">
+      <div class="form-card" style="margin-top:14px">
+        <label class="row"><span>使用日期</span><input type="date" name="date" required></label>
+        <label class="row"><span>使用次数</span><input type="number" name="count" min="1" step="1" value="1" required inputmode="numeric"></label>
+        <label class="row col"><span>备注</span><textarea name="notes" rows="2" placeholder="选填，例如：周末露营用了两天"></textarea></label>
+      </div>
+      <p class="form-tip">补录会累加这件装备的使用次数，之后可以撤销并回滚。</p>
+      <div class="dock">
+        <button type="submit" class="btn-main">保存记录</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 资产选择器 ================= -->
+<div class="sheet" id="picker-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong id="picker-title">添加装备</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll">
+      <div class="trip-tools">
+        <div class="searchbar">
+          <span>🔍</span>
+          <input id="picker-q" type="search" placeholder="搜索资产名称、分类" autocomplete="off">
+        </div>
+      </div>
+      <div id="picker-list" class="picker-list"></div>
+      <div style="height:8px"></div>
+    </div>
+    <div class="dock">
+      <button class="btn-main" id="picker-add">加入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 打包模板编辑 ================= -->
+<div class="sheet" id="tpl-editor-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong id="tpl-editor-title">新建模板</strong>
+      <span style="width:44px"></span>
+    </div>
+    <form class="sheet-scroll" id="tpl-form" autocomplete="off">
+      <div class="form-section">模板信息</div>
+      <div class="form-card">
+        <label class="row"><span>模板名称</span><input name="name" required placeholder="例如：我的周末轻装"></label>
+        <label class="row"><span>适用行程</span><select name="tripType" id="tpl-trip-type"></select></label>
+        <label class="row"><span>季节</span><select name="season" id="tpl-season"></select></label>
+        <label class="row col"><span>备注</span><textarea name="notes" rows="2" placeholder="选填"></textarea></label>
+      </div>
+
+      <div class="form-section">模板物品</div>
+      <div class="form-card tpl-items-card">
+        <div id="tpl-items" class="tpl-items"></div>
+        <div class="tpl-add-row">
+          <input id="tpl-item-input" placeholder="输入物品名称，例如：身份证">
+          <button type="button" id="tpl-item-add">添加</button>
+        </div>
+        <button type="button" class="btn-main ghost tpl-asset-btn" id="tpl-add-asset">从我的资产选择</button>
+      </div>
+      <p class="form-tip">勾选「必选」的物品，套用时会默认加入计划携带；没勾的作为选带。</p>
+
+      <div class="danger-zone hidden" id="tpl-danger">
+        <button type="button" class="danger-link" id="tpl-del">删除模板</button>
+      </div>
+
+      <div class="dock">
+        <button type="submit" class="btn-main">保存模板</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= 系统模板预览 ================= -->
+<div class="sheet" id="tpl-view-sheet">
+  <div class="sheet-panel">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong id="tpl-view-title">打包模板</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll" id="tpl-view-body"></div>
+    <div class="dock trip-detail-dock">
+      <button class="btn-main ghost" data-close>关闭</button>
+      <button class="btn-main" id="tpl-copy">复制并编辑</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 删除行程 ================= -->
+<div class="sheet" id="trip-delete-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>删除行程</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll">
+      <div class="gdelete-wrap">
+        <p class="gdelete-title" id="trip-delete-name"></p>
+        <p class="gdelete-sub">使用记录是资产成本的一部分，选择怎么处理：</p>
+        <button type="button" class="gdelete-opt danger" data-trip-del-rollback>
+          <b>删除行程并回滚使用记录</b>
+          <small>资产累计使用次数会同步减少</small>
+        </button>
+        <button type="button" class="gdelete-opt" data-trip-del-keep>
+          <b>删除行程，保留使用记录</b>
+          <small>记录转为手动补录，资产成本不受影响</small>
+        </button>
+      </div>
+    </div>
+    <div class="dock">
+      <button class="btn-main ghost" data-close>取消</button>
+    </div>
+  </div>
+</div>
+
 <!-- ================= 登录 ================= -->
 <div class="sheet" id="login-sheet">
   <div class="sheet-panel sheet-auto">
@@ -493,11 +803,11 @@
 <!-- ================= 通用图标选择 ================= -->
 <div class="toast" id="toast"></div>
 
-<script src="config.js?v=23"></script>
-<script src="cloud.js?v=23"></script>
-<script src="icons.js?v=23"></script>
-<script src="icons3d.js?v=23"></script>
-<script src="app.js?v=23"></script>
+<script src="config.js?v=24"></script>
+<script src="cloud.js?v=25"></script>
+<script src="icons.js?v=24"></script>
+<script src="icons3d.js?v=24"></script>
+<script src="app.js?v=39"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {

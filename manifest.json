@@ -1,13 +1,13 @@
 {
-  "name": "装备台账 · 日均成本",
+  "name": "装备台账 · 山野手账",
   "short_name": "装备台账",
-  "description": "记录装备买入价，自动算日均和单次使用成本。",
+  "description": "记录装备、行程与使用次数，算清每次出行的成本。",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f2f3f8",
-  "theme_color": "#4354f0",
+  "background_color": "#f7f1e3",
+  "theme_color": "#b8491d",
   "lang": "zh-CN",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },

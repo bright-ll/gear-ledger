@@ -28,6 +28,19 @@
     { k: '1500to3000', label: '1500–3000' },
     { k: 'gt3000', label: '3000 以上' }
   ];
+  /* ---------- 行程 / 使用记录 / 打包模板 ---------- */
+  var TRIP_TYPES = ['轻装一日', '重装露营', '多日穿越', '雪山', '城市周边'];
+  var TRIP_STATUSES = ['计划中', '进行中', '已完成', '已取消'];
+  var SEASONS = ['通用', '春', '夏', '秋', '冬'];
+  var USAGE_SOURCES = ['行程生成', '手动补录'];
+  var TRIP_TYPE_ICON = {
+    '轻装一日': '🥾', '重装露营': '⛺', '多日穿越': '🏔️',
+    '雪山': '❄️', '城市周边': '🏙️'
+  };
+  var TRIP_STATUS_CLASS = {
+    '计划中': 'plan', '进行中': 'doing', '已完成': 'done', '已取消': 'cancel'
+  };
+  var LS_TPL_SEED = 'gearLedger.tplSeeded';
   /* 装备库分类：固定 8 类，界面不提供增删入口，不从 storage 读取 */
   var GEAR_CATS = ['背负', '穿着', '鞋袜', '睡眠', '饮食', '行进', '安全', '数码'];
   var GEAR_CAT_ICON = {
@@ -85,8 +98,9 @@
     p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return p.join('.');
   }
-  function money(n) { return group(n, false); }
+  function money(n) { return group(n, true); }
   function money2(n) { return group(n, true); }
+  function cash(n) { return '<em class="cur">' + CUR + '</em>' + money(n); }
   function todayStr() {
     var d = new Date();
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -117,6 +131,7 @@
   }
   function uid() { return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
+  var usageCountCache = null;
   var toastTimer;
   function toast(msg) {
     var t = $('#toast');
@@ -135,9 +150,21 @@
       return obj[key] == null ? fallback : obj[key];
     } catch (e) { return fallback; }
   }
+  function loadArr(key) {
+    var v = load(key, null);
+    return Array.isArray(v) ? v : [];
+  }
   function saveAll() {
+    usageCountCache = null;
     try {
-      localStorage.setItem(LS, JSON.stringify({ items: DB.items, gear: DB.gear }));
+      localStorage.setItem(LS, JSON.stringify({
+        items: DB.items,
+        gear: DB.gear,
+        trips: DB.trips,
+        tripGear: DB.tripGear,
+        usage: DB.usage,
+        templates: DB.templates
+      }));
     } catch (e) {
       var quota = e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e.message)));
       toast(quota ? '本地空间不够了，删掉几张照片再试' : '本地存储不可用，刷新后会丢失');
@@ -265,12 +292,240 @@
   var hasLocal = !!load('items', null);
   var DB = {
     items: hasLocal ? load('items', null) : markDemo(seedItems()),
-    gear: load('gear', null) || markDemo(seedGear())
+    gear: load('gear', null) || markDemo(seedGear()),
+    trips: loadArr('trips'),
+    tripGear: loadArr('tripGear'),
+    usage: loadArr('usage'),
+    templates: loadArr('templates')
   };
   if (!hasLocal) {
     // 示例数据打上标记：永远不会被同步到云端
     saveAll();
   }
+
+  /* ---------- 系统预置打包模板 ---------- */
+  function tplItem(id, name, required) {
+    return { id: id, assetId: '', gearId: '', name: name, required: !!required, notes: '' };
+  }
+  function seedTemplates() {
+    var dayItems = [
+      tplItem('ti_day_1', '背包', true), tplItem('ti_day_2', '徒步鞋', true),
+      tplItem('ti_day_3', '冲锋衣', true), tplItem('ti_day_4', '饮水', true),
+      tplItem('ti_day_5', '路餐', true), tplItem('ti_day_6', '头灯', true),
+      tplItem('ti_day_7', '雨衣', false), tplItem('ti_day_8', '急救包', true),
+      tplItem('ti_day_9', '手机', true)
+    ];
+    var campItems = [
+      tplItem('ti_camp_1', '重装背包', true), tplItem('ti_camp_2', '帐篷', true),
+      tplItem('ti_camp_3', '睡袋', true), tplItem('ti_camp_4', '睡垫', true),
+      tplItem('ti_camp_5', '炉头', true), tplItem('ti_camp_6', '气罐', true),
+      tplItem('ti_camp_7', '锅具', true), tplItem('ti_camp_8', '头灯', true),
+      tplItem('ti_camp_9', '徒步鞋', true), tplItem('ti_camp_10', '冲锋衣', true),
+      tplItem('ti_camp_11', '路餐', true), tplItem('ti_camp_12', '水袋', true),
+      tplItem('ti_camp_13', '急救包', true)
+    ];
+    var thruItems = [
+      tplItem('ti_thru_1', '重装背包', true), tplItem('ti_thru_2', '帐篷', true),
+      tplItem('ti_thru_3', '睡袋', true), tplItem('ti_thru_4', '睡垫', true),
+      tplItem('ti_thru_5', '炉头', true), tplItem('ti_thru_6', '气罐', true),
+      tplItem('ti_thru_7', '锅具', true), tplItem('ti_thru_8', '头灯', true),
+      tplItem('ti_thru_9', '徒步鞋', true), tplItem('ti_thru_10', '冲锋衣', true),
+      tplItem('ti_thru_11', '换洗衣物', true), tplItem('ti_thru_12', '防晒', false),
+      tplItem('ti_thru_13', '充电宝', false), tplItem('ti_thru_14', '急救包', true),
+      tplItem('ti_thru_15', '路餐', true)
+    ];
+    var snowItems = [
+      tplItem('ti_snow_1', '重装背包', true), tplItem('ti_snow_2', '冰爪', true),
+      tplItem('ti_snow_3', '冰镐', true), tplItem('ti_snow_4', '头盔', true),
+      tplItem('ti_snow_5', '安全带', true), tplItem('ti_snow_6', '羽绒服', true),
+      tplItem('ti_snow_7', '冲锋衣', true), tplItem('ti_snow_8', '雪套', true),
+      tplItem('ti_snow_9', '墨镜', true), tplItem('ti_snow_10', '手套', true),
+      tplItem('ti_snow_11', '睡袋', true), tplItem('ti_snow_12', '急救包', true)
+    ];
+    var cityItems = [
+      tplItem('ti_city_1', '小背包', true), tplItem('ti_city_2', '运动鞋', true),
+      tplItem('ti_city_3', '水壶', true), tplItem('ti_city_4', '雨伞', false),
+      tplItem('ti_city_5', '充电宝', false), tplItem('ti_city_6', '手机', true)
+    ];
+    var stamp = 1;
+    return [
+      { id: 'tpl_sys_day', name: '轻装一日', tripType: '轻装一日', season: '通用',
+        system: true, notes: '轻装快走：只带当天必需的装备。', items: dayItems, updatedAt: stamp, deleted: false },
+      { id: 'tpl_sys_camp', name: '重装露营', tripType: '重装露营', season: '通用',
+        system: true, notes: '重装过夜：帐篷、睡眠和炊事系统要带全。', items: campItems, updatedAt: stamp, deleted: false },
+      { id: 'tpl_sys_thru', name: '多日穿越', tripType: '多日穿越', season: '通用',
+        system: true, notes: '多日无补给：按天数准备路餐和换洗衣物。', items: thruItems, updatedAt: stamp, deleted: false },
+      { id: 'tpl_sys_snow', name: '雪山攀登', tripType: '雪山', season: '冬',
+        system: true, notes: '雪山线路：冰雪技术和保暖装备优先。', items: snowItems, updatedAt: stamp, deleted: false },
+      { id: 'tpl_sys_city', name: '城市周边', tripType: '城市周边', season: '通用',
+        system: true, notes: '城市周边：轻便、补给方便，少带冗余。', items: cityItems, updatedAt: stamp, deleted: false }
+    ];
+  }
+  function ensureTemplates() {
+    var seeded = false;
+    try { seeded = localStorage.getItem(LS_TPL_SEED) === '1'; } catch (e) {}
+    if (seeded) return false;
+    var have = {};
+    DB.templates.forEach(function (t) { if (t && t.id) have[t.id] = true; });
+    var added = false;
+    seedTemplates().forEach(function (t) {
+      if (!have[t.id]) { DB.templates.push(t); added = true; }
+    });
+    try { localStorage.setItem(LS_TPL_SEED, '1'); } catch (e) {}
+    return added;
+  }
+  if (ensureTemplates()) saveAll();
+
+  /* ---------- 旧数据迁移：baseCount / useLog → 使用记录 ---------- */
+  function normalizeUsageRecord(u) {
+    if (!u || typeof u !== 'object') return null;
+    if (!u.id) u.id = uid();
+    u.assetId = u.assetId || '';
+    u.assetName = u.assetName || '';
+    u.tripId = u.tripId || null;
+    u.date = u.date ? String(u.date).slice(0, 10) : todayStr();
+    u.count = Math.max(1, Number(u.count) || 1);
+    u.source = USAGE_SOURCES.indexOf(u.source) >= 0 ? u.source : '手动补录';
+    u.notes = u.notes || '';
+    u.updatedAt = Number(u.updatedAt) || Date.now();
+    u.deleted = !!u.deleted;
+    return u;
+  }
+  function ensureUsageData() {
+    var changed = false;
+    var now = Date.now();
+    if (!Array.isArray(DB.items)) DB.items = [];
+    if (!Array.isArray(DB.gear)) DB.gear = [];
+    if (!Array.isArray(DB.trips)) DB.trips = [];
+    if (!Array.isArray(DB.tripGear)) DB.tripGear = [];
+    if (!Array.isArray(DB.usage)) DB.usage = [];
+    if (!Array.isArray(DB.templates)) DB.templates = [];
+    var byId = {};
+    DB.usage = (DB.usage || []).map(function (u) {
+      var n = normalizeUsageRecord(u);
+      if (n) byId[n.id] = n;
+      return n;
+    }).filter(Boolean);
+
+    DB.items.forEach(function (it) {
+      if (!Array.isArray(it.useLog)) it.useLog = [];
+      var base = Number(it.baseCount) || 0;
+      if (base > 0) {
+        var baseId = 'ub_' + it.id;
+        if (!byId[baseId]) {
+          var rec = normalizeUsageRecord({
+            id: baseId, assetId: it.id, assetName: it.name,
+            tripId: null, date: it.purchaseDate || todayStr(), count: base,
+            source: '手动补录', notes: '升级前累计使用', demo: !!it.demo,
+            updatedAt: now, deleted: false
+          });
+          DB.usage.push(rec); byId[baseId] = rec;
+        }
+        it.baseCount = 0;
+        it.updatedAt = now;
+        changed = true;
+      }
+      it.useLog.forEach(function (log, i) {
+        var d = typeof log === 'string' ? log : (log && log.date);
+        if (!d) return;
+        var lid = 'ul_' + it.id + '_' + i;
+        if (!byId[lid]) {
+          var rec2 = normalizeUsageRecord({
+            id: lid, assetId: it.id, assetName: it.name,
+            tripId: null, date: d, count: 1, source: '手动补录',
+            notes: '旧版使用记录', demo: !!it.demo, updatedAt: now, deleted: false
+          });
+          DB.usage.push(rec2); byId[lid] = rec2;
+          changed = true;
+        }
+      });
+      if (it.useLog.length) {
+        it.useLog = [];
+        it.updatedAt = now;
+        changed = true;
+      }
+    });
+
+    (DB.tripGear || []).forEach(function (g) {
+      if (!g.id) g.id = uid();
+      g.tripId = g.tripId || '';
+      g.assetId = g.assetId || '';
+      g.assetName = g.assetName || '';
+      g.source = g.source === '模板带入' ? '模板带入' : '手动添加';
+      g.planned = g.planned !== false;
+      g.actualCarry = g.actualCarry == null ? null : !!g.actualCarry;
+      g.actualUse = g.actualUse == null ? null : !!g.actualUse;
+      g.useIncrement = Math.max(1, Number(g.useIncrement) || 1);
+      g.notes = g.notes || '';
+      g.updatedAt = Number(g.updatedAt) || now;
+      g.deleted = !!g.deleted;
+    });
+    (DB.trips || []).forEach(function (t) {
+      if (!t.id) t.id = uid();
+      t.name = t.name || '未命名行程';
+      t.startDate = t.startDate || todayStr();
+      t.endDate = t.endDate || t.startDate;
+      t.type = TRIP_TYPES.indexOf(t.type) >= 0 ? t.type : '轻装一日';
+      t.status = TRIP_STATUSES.indexOf(t.status) >= 0 ? t.status : '计划中';
+      t.companions = Math.max(0, Number(t.companions) || 0);
+      t.transportCost = Number(t.transportCost) || 0;
+      t.lodgingCost = Number(t.lodgingCost) || 0;
+      t.otherCost = Number(t.otherCost) || 0;
+      t.createdAt = Number(t.createdAt) || now;
+      t.updatedAt = Number(t.updatedAt) || now;
+      t.deleted = !!t.deleted;
+    });
+
+    // 约束兜底：同一行程同一资产只保留一条；同一资产同一行程只保留一条使用记录
+    var tgSeen = {};
+    (DB.tripGear || []).forEach(function (g) {
+      if (g.deleted || !g.tripId || !g.assetId) return;
+      var key = g.tripId + '|' + g.assetId;
+      var old = tgSeen[key];
+      if (!old) { tgSeen[key] = g; return; }
+      if ((g.updatedAt || 0) > (old.updatedAt || 0)) {
+        old.deleted = true; old.updatedAt = now; tgSeen[key] = g;
+      } else {
+        g.deleted = true; g.updatedAt = now;
+      }
+      changed = true;
+    });
+    var usageSeen = {};
+    (DB.usage || []).forEach(function (u) {
+      if (u.deleted || !u.tripId || !u.assetId) return;
+      var key = u.assetId + '|' + u.tripId;
+      var old = usageSeen[key];
+      if (!old) { usageSeen[key] = u; return; }
+      if ((u.updatedAt || 0) > (old.updatedAt || 0)) {
+        old.deleted = true; old.updatedAt = now; usageSeen[key] = u;
+      } else {
+        u.deleted = true; u.updatedAt = now;
+      }
+      changed = true;
+    });
+    (DB.templates || []).forEach(function (t) {
+      if (!t.id) t.id = uid();
+      t.name = t.name || '未命名模板';
+      t.tripType = TRIP_TYPES.indexOf(t.tripType) >= 0 ? t.tripType : '轻装一日';
+      t.season = SEASONS.indexOf(t.season) >= 0 ? t.season : '通用';
+      t.system = !!t.system;
+      t.notes = t.notes || '';
+      t.items = (t.items || []).filter(function (x) { return x && (x.name || x.assetId || x.gearId); });
+      t.items.forEach(function (x) {
+        if (!x.id) x.id = uid();
+        x.name = x.name || '';
+        x.assetId = x.assetId || '';
+        x.gearId = x.gearId || '';
+        x.required = !!x.required;
+        x.notes = x.notes || '';
+      });
+      t.updatedAt = Number(t.updatedAt) || now;
+      t.deleted = !!t.deleted;
+    });
+    usageCountCache = null;
+    if (changed) saveAll();
+  }
+  ensureUsageData();
 
   // 老数据里的「设置有效期」之前没生效，一次性给有年限的记录打开，
   // 避免升级后这些物品突然不再提示超期
@@ -375,6 +630,22 @@
     gearCollapsed: {},
     detailId: null,
     gearId: null,
+    tripSub: 'trips',
+    tripStatus: '全部',
+    tripId: null,
+    tripEditingId: null,
+    usageAssetId: null,
+    usageQ: '',
+    usageRange: 'all',
+    pickerMode: null,
+    pickerTripId: null,
+    pickerSelected: {},
+    pickerQ: '',
+    tplEditingId: null,
+    tplViewId: null,
+    tplItems: [],
+    confirmTripId: null,
+    tripDeleteId: null,
     editingId: null,
     editingGearId: null,
     editingCatalogId: null,
@@ -471,6 +742,36 @@
     return Math.round(v);
   }
 
+  /* 使用记录：成本与闲置率统计的唯一数据源 */
+  function usageRecordsOf(assetId) {
+    return (DB.usage || []).filter(function (u) {
+      return u && !u.deleted && u.assetId === assetId;
+    });
+  }
+  function usageTotal(assetId) {
+    if (!usageCountCache) {
+      usageCountCache = {};
+      (DB.usage || []).forEach(function (u) {
+        if (!u || u.deleted || !u.assetId) return;
+        usageCountCache[u.assetId] = (usageCountCache[u.assetId] || 0) + (Number(u.count) || 1);
+      });
+    }
+    return usageCountCache[assetId] || 0;
+  }
+  function lastUsageDate(assetId) {
+    var last = '';
+    usageRecordsOf(assetId).forEach(function (u) {
+      if (!last || String(u.date) > last) last = String(u.date);
+    });
+    return last;
+  }
+  function unitCostOf(it) {
+    if (!it) return null;
+    var c = calc(it);
+    return c.used > 0 ? c.net / c.used : null;
+  }
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+
   function calc(it) {
     var price = Number(it.price) || 0;
     var qty = Number(it.qty) || 1;
@@ -481,12 +782,13 @@
     // 「设置有效期」关闭时只算持有天数和日均，不再提示超期
     var overdue = !!(it.hasExpiry && expireAt && todayStr() > expireAt);
     var net = it.subtractResale ? Math.max(total - (Number(it.resale) || 0), 0) : total;
-    var daily = net / Math.max(days, 1);
-    var used = (Number(it.baseCount) || 0) + (it.useLog ? it.useLog.length : 0);
-    var perUse = it.trackPerUse && used > 0 ? net / used : null;
+    var daily = days > 0 ? net / days : null;
+    var used = (Number(it.baseCount) || 0) + usageTotal(it.id);
+    var unitCost = used > 0 ? net / used : null;
+    var perUse = it.trackPerUse ? unitCost : null;
     return {
       total: total, net: net, days: days, life: life, expireAt: expireAt, overdue: overdue,
-      daily: daily, used: used, perUse: perUse
+      daily: daily, used: used, unitCost: unitCost, perUse: perUse
     };
   }
 
@@ -530,7 +832,7 @@
       return true;
     }).sort(function (a, b) {
       var ca = calc(a), cb = calc(b);
-      if (state.sort === 'daily') return cb.daily - ca.daily;
+      if (state.sort === 'daily') return (cb.daily == null ? -1e15 : cb.daily) - (ca.daily == null ? -1e15 : ca.daily);
       if (state.sort === 'price') return cb.net - ca.net;
       if (state.sort === 'days') return cb.days - ca.days;
       return (b.purchaseDate || '').localeCompare(a.purchaseDate || '');
@@ -699,8 +1001,8 @@
         '</div>' +
         '<div class="a-line2">' +
           ((Number(it.qty) || 1) > 1 ? '<span class="a-qty">×' + it.qty + '</span>' : '') +
-          '<span class="a-price">' + CUR +  money(c.net) + '</span>' +
-          '<span class="a-daily">' + CUR +  money(c.daily) + '<small>/天</small></span>' +
+          '<span class="a-price">' + cash(c.net) + '</span>' +
+          '<span class="a-daily">' + (c.daily == null ? '数据不足' : cash(c.daily) + '<small>/天</small>') + '</span>' +
         '</div>' + sub +
       '</div>' +
     '</article>';
@@ -715,9 +1017,9 @@
       '</div>' +
       '<div class="acard-body">' +
         '<div class="acard-name">' + esc(it.name) + badge + '</div>' +
-        '<div class="acard-money"><b>' + CUR +  money(c.net) + '</b>' +
+        '<div class="acard-money"><b>' + cash(c.net) + '</b>' +
           (q > 1 ? '<span>×' + q + '</span>' : '') +
-          '<span>' + CUR +  money(c.daily) + '/天</span></div>' +
+          '<span>' + (c.daily == null ? '数据不足' : cash(c.daily) + '/天') + '</span></div>' +
         '<div class="acard-days' + (c.overdue ? ' over' : '') + '">' + c.days + ' 天</div>' +
       '</div>' +
     '</article>';
@@ -728,8 +1030,8 @@
     return '<div class="aitem" data-id="' + it.id + '">' +
       '<span class="at-name">' + esc(it.name) + badge + '</span>' +
       '<span class="at-days' + (c.overdue ? ' over' : '') + '">' + c.days + '天</span>' +
-      '<span class="at-price">' + (q > 1 ? '×' + q + ' · ' : '') +  CUR +  money(c.net) + '</span>' +
-      '<span class="at-daily">' + CUR +  money(c.daily) + '/天</span>' +
+      '<span class="at-price">' + (q > 1 ? '×' + q + ' · ' : '') +  cash(c.net) + '</span>' +
+      '<span class="at-daily">' + (c.daily == null ? '数据不足' : cash(c.daily) + '/天') + '</span>' +
     '</div>';
   }
 
@@ -739,7 +1041,7 @@
     renderDemoTip();
 
     var list = filteredItems();
-    var sumTotal = 0, sumDaily = 0, sumCount = 0;
+    var sumTotal = 0, sumDaily = 0, sumDailyKnown = 0, sumCount = 0;
     var view = state.assetView;
     var box = $('#asset-list');
     box.className = 'asset-box view-' + view;
@@ -747,7 +1049,7 @@
     box.innerHTML = list.map(function (it) {
       var c = calc(it);
       sumTotal += c.net;
-      sumDaily += c.daily;
+      if (c.daily != null) { sumDaily += c.daily; sumDailyKnown++; }
       sumCount += (Number(it.qty) || 1);
 
       var st = statusOf(it, c);
@@ -758,7 +1060,7 @@
 
       var sub = '';
       if (it.trackPerUse) {
-        sub = '<div class="a-sub">次均 ' + (c.perUse == null ? '无' : '' + CUR +  money(c.perUse)) +
+        sub = '<div class="a-sub">次均 ' + (c.unitCost == null ? '数据不足' : '' + cash(c.unitCost)) +
               ' · 已用 ' + c.used + ' 次</div>';
       }
 
@@ -780,10 +1082,16 @@
       : (phoneLayout ? '点右下角的「＋」，把第一件东西记下来' : '点下面的「新增」，把第一件东西记下来');
     $('#asset-empty-reset').classList.toggle('hidden', !isFiltered);
     $('#asset-empty').classList.toggle('hidden', list.length > 0);
-    $('#sum-total').textContent = money(sumTotal);
-    $('#sum-daily').textContent = money(sumDaily);
+    $('#sum-total').innerHTML = cash(sumTotal);
+    $('#sum-daily').innerHTML = (list.length && !sumDailyKnown) ? '数据不足' : cash(sumDaily);
     $('#sum-count').textContent = sumCount;
     $('#hero-title').textContent = state.status === '全部' ? '全部物品' : state.status;
+
+    var assetEnd = $('#asset-end');
+    if (assetEnd) {
+      assetEnd.classList.toggle('hidden', list.length === 0);
+      assetEnd.innerHTML = '共 <b>' + sumCount + '</b> 件 · 已经到底';
+    }
   }
 
   /* =========================================================
@@ -799,12 +1107,12 @@
     var cells = [
       ['物品名称', esc(it.name), ''],
       ['购买时间', fmtDate(it.purchaseDate), ''],
-      ['价格', '' + CUR +  money2(it.price), 'mono'],
+      ['价格', '' + cash(it.price), 'mono'],
       ['数量', String(it.qty || 1), 'mono'],
-      ['总价(价格×数量+附加)', '' + CUR +  money(c.total), 'mono'],
+      ['总价(价格×数量+附加)', '' + cash(c.total), 'mono'],
       ['预计用多久', it.lifeValue ? it.lifeValue + ' ' + it.lifeUnit : '无', ''],
-      ['日均费用', '' + CUR +  money(c.daily) + '/天', 'mono blue'],
-      ['次均费用', c.perUse == null ? '无' : '' + CUR +  money(c.perUse), 'mono'],
+      ['日均费用', c.daily == null ? '数据不足' : '' + cash(c.daily) + '/天', 'mono blue'],
+      ['单次成本', c.unitCost == null ? '数据不足' : '' + cash(c.unitCost), 'mono'],
       ['持有天数', c.days + ' 天', 'mono'],
       ['退役时间', c.expireAt ? fmtDate(c.expireAt) : '无', ''],
       ['使用状态', st, c.overdue ? 'red' : ''],
@@ -813,7 +1121,7 @@
     ];
     if (it.gearCat) cells.push(['装备分类', it.gearCat, '']);
     if (it.weight) cells.push(['重量', fmtWeight(it.weight), 'mono']);
-    if (it.officialPrice) cells.push(['官方价', CUR +  money2(it.officialPrice), 'mono']);
+    if (it.officialPrice) cells.push(['官方价', cash(it.officialPrice), 'mono']);
 
     var grid = cells.map(function (x) {
       var cls = 'dg';
@@ -822,23 +1130,36 @@
 
     var cells2 = [
       ['是否减去二手价值', it.subtractResale ? '是' : '否'],
-      ['二手价值', it.resale ? '' + CUR +  money2(it.resale) : '未填写'],
-      ['是否计算单次使用金额', it.trackPerUse ? '是' : '否'],
-      ['使用频率', c.used ? c.used + ' 次' : '无']
+      ['二手价值', it.resale ? '' + cash(it.resale) : '未填写'],
+      ['列表显示单次成本', it.trackPerUse ? '是' : '否'],
+      ['累计使用', c.used ? c.used + ' 次' : '还没有记录']
     ];
     var grid2 = cells2.map(function (x) {
       return '<div class="dg"><div class="k">' + x[0] + '</div><div class="v">' + x[1] + '</div></div>';
     }).join('');
 
-    var useBlock = it.trackPerUse
-      ? '<div class="detail-note"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px">' +
-          '<div><div style="font-weight:800;font-size:14px">使用记录</div>' +
-          '<div style="font-size:12px;color:#9aa0ae;margin-top:2px">累计 ' + c.used + ' 次' +
-          (it.useLog && it.useLog.length ? ' · 上次 ' + fmtDate(it.useLog[it.useLog.length - 1]) : '') +
-          '</div></div>' +
-          '<button class="btn-main" style="width:auto;padding:10px 18px;font-size:14px;border-radius:12px" data-use="' + it.id + '">用了一次</button>' +
-        '</div></div>'
-      : '';
+    var usageList = usageRecordsOf(it.id).sort(function (a, b) {
+      return String(b.date || '').localeCompare(String(a.date || '')) ||
+        (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+    var usageHtml = usageList.map(function (u) {
+      var trip = u.tripId ? (DB.trips || []).find(function (t) { return t.id === u.tripId; }) : null;
+      return '<div class="usage-mini">' +
+        '<div class="usage-mini-main"><b>' + fmtDate(u.date) + ' · ×' + (u.count || 1) + '</b>' +
+          '<small>' + esc(u.source || '手动补录') + (trip ? ' · ' + esc(trip.name) : '') +
+            (u.notes ? ' · ' + esc(u.notes) : '') + '</small></div>' +
+        '<button class="text-btn danger" data-usage-del="' + u.id + '">撤销</button>' +
+      '</div>';
+    }).join('');
+    var useBlock = '<div class="detail-note usage-block">' +
+      '<div class="usage-head"><div><div class="usage-title">使用履历</div>' +
+        '<div class="usage-sub">累计 ' + c.used + ' 次 · 单次成本 ' +
+          (c.unitCost == null ? '数据不足' : cash(c.unitCost)) +
+          ' · 上次 ' + (usageList.length ? fmtDate(usageList[0].date) : '无') + '</div></div>' +
+        '<button class="btn-main usage-add-btn" data-usage-add="' + it.id + '">补录</button>' +
+      '</div>' +
+      (usageHtml || '<div class="usage-empty">还没有使用记录。完成行程会自动生成，也可以手动补录。</div>') +
+    '</div>';
 
     var noteBlock = it.notes
       ? '<div class="detail-note"><div style="font-size:12px;color:#9aa0ae;margin-bottom:4px">备注</div>' + esc(it.notes) + '</div>'
@@ -884,12 +1205,95 @@
       '<div class="detail-card"><div class="detail-grid">' + grid2 + '</div></div>' +
       tagBlock + useBlock + gearBlock + unlinkBlock + noteBlock + '<div style="height:8px"></div>';
 
+    var linkBtn = $('#btn-to-gear');
+    if (linkBtn) {
+      // 只有户外资产才显示「加入装备库 / 查看装备资料」
+      linkBtn.classList.toggle('hidden', it.cat !== '户外');
+      var linkedForBtn = it.catalogId
+        ? DB.gear.find(function (g) { return g.id === it.catalogId && !g.deleted; })
+        : null;
+      linkBtn.textContent = linkedForBtn ? '查看装备资料' : '加入装备库';
+      var delBtn = $('#btn-del');
+      if (delBtn) delBtn.textContent = linkedForBtn ? '删除并解绑' : '删除这件物品';
+    }
+
     openSheet('#detail-sheet');
+  }
+
+  /* 资产 → 装备库：为这件资产建一张资料卡（或关联同名卡片） */
+  function gearCatForAsset(it) {
+    if (it.gearCat) return it.gearCat;
+    var hay = (it.name || '') + ' ' + (it.tags || []).join(' ');
+    if (/冲锋衣|软壳|硬壳|羽绒|抓绒|鹅绒|绒|服|衣|裤|帽|手套|围脖/.test(hay)) return '穿着';
+    return mapGearCat(it);
+  }
+
+  function addItemToGear(it) {
+    if (!it) return;
+    var same = DB.gear.find(function (g) {
+      return !g.deleted && g.name.trim() === String(it.name || '').trim();
+    });
+    if (same) {
+      var owner = ownedItem(same.id);
+      if (owner && owner.id !== it.id) {
+        toast('装备库已有同名装备，且已关联其他资产');
+        return;
+      }
+      it.catalogId = same.id;
+      if (!it.gearCat) it.gearCat = same.cat;
+      it.updatedAt = Date.now();
+      saveAll();
+      renderAssets();
+      renderGear();
+      openDetail(it.id);
+      toast('已关联装备库里的同名装备');
+      return;
+    }
+
+    var now = Date.now();
+    var gear = {
+      id: newGearId(),
+      name: it.name,
+      brand: '',
+      cat: gearCatForAsset(it),
+      type: '',
+      refPrice: Number(it.officialPrice) || Number(it.price) || 0,
+      weight: Number(it.weight) || 0,
+      icon: it.icon || '',
+      iconImg: it.iconImg || null,
+      photo: it.photo || null,
+      tags: (it.tags || []).slice(),
+      specs: [],
+      perf: [],
+      fav: false,
+      demo: !!it.demo,
+      updatedAt: now
+    };
+    DB.gear.push(gear);
+    it.catalogId = gear.id;
+    it.gearCat = gear.cat;
+    it.updatedAt = now;
+    saveAll();
+    renderAssets();
+    renderGear();
+    openDetail(it.id);
+    toast('已加入装备库');
   }
 
   /* =========================================================
      编辑器
      ========================================================= */
+  /* 装备分类只在资产分类为「户外」时显示 */
+  function syncGearCatRow(cat, clear) {
+    var sel = $('#editor-gearCat');
+    if (!sel) return;
+    var row = sel.closest('.row');
+    if (!row) return;
+    var isOutdoor = cat === '户外';
+    row.classList.toggle('hidden', !isOutdoor);
+    if (!isOutdoor && clear) sel.value = '';
+  }
+
   function openEditor(item, preset) {
     var f = $('#editor-form');
     state.editingId = item ? item.id : null;
@@ -923,7 +1327,7 @@
     f.elements.subtractResale.checked = !!d.subtractResale;
     f.elements.resale.value = d.resale || '';
     f.elements.trackPerUse.checked = !!d.trackPerUse;
-    f.elements.baseCount.value = d.baseCount || 0;
+    if (f.elements.baseCount) f.elements.baseCount.value = d.baseCount || 0;
     f.elements.notes.value = d.notes || '';
 
     // 装备分类：和装备库共用同一套 8 类，非户外物品可以留空
@@ -934,6 +1338,7 @@
       }).join('');
       gcatSel.value = d.gearCat || '';
     }
+    syncGearCatRow(f.elements.cat.value, false);
     f.elements.weight.value = d.weight ? d.weight : '';
     f.elements.officialPrice.value = d.officialPrice != null ? d.officialPrice : '';
 
@@ -997,6 +1402,9 @@
       return;
     }
 
+    var prevItem = state.editingId
+      ? DB.items.find(function (x) { return x.id === state.editingId; })
+      : null;
     var item = {
       id: state.editingId || uid(),
       name: el.name.value.trim(),
@@ -1018,9 +1426,9 @@
       subtractResale: el.subtractResale.checked,
       resale: Number(el.resale.value) || 0,
       trackPerUse: el.trackPerUse.checked,
-      baseCount: Number(el.baseCount.value) || 0,
+      baseCount: el.baseCount ? (Number(el.baseCount.value) || 0) : (prevItem ? (Number(prevItem.baseCount) || 0) : 0),
       catalogId: state.editingCatalogId || null,
-      useLog: [],
+      useLog: prevItem ? (prevItem.useLog || []) : [],
       tags: parseTags(el.tags.value),
       notes: el.notes.value.trim(),
       updatedAt: Date.now(),
@@ -1030,7 +1438,6 @@
     var idx = DB.items.findIndex(function (x) { return x.id === item.id; });
     var isNew = idx < 0;
     if (idx >= 0) {
-      item.useLog = DB.items[idx].useLog || [];
       DB.items[idx] = item;
     } else {
       DB.items.unshift(item);
@@ -1117,8 +1524,8 @@
         (g.brand ? '<div class="card-brand">' + esc(g.brand) + '</div>' : '') +
         '<h3 class="card-name" data-open="' + g.id + '">' + esc(g.name) + '</h3>' +
         '<div class="card-badges">' + (g.tags || []).slice(0, 2).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>' +
-        '<div class="card-foot"><span class="price">' + CUR +  money2(gearPrice(g)) + '</span>' +
-          (own ? '<span class="own-tag">' + (oc.perUse == null ? oc.days + '天' : '' + CUR +  money(oc.perUse) + '/次') + '</span>'
+        '<div class="card-foot"><span class="price">' + cash(gearPrice(g)) + '</span>' +
+          (own ? '<span class="own-tag">' + (oc.perUse == null ? oc.days + '天' : '' + cash(oc.perUse) + '/次') + '</span>'
                : (w ? '<span class="card-w">' + w + '</span>' : '')) +
         '</div>' +
         '<button class="card-add' + (own ? ' done' : '') + '" data-gadd="' + g.id + '">' +
@@ -1133,7 +1540,7 @@
       '<span class="gt-name">' + esc(g.name) + '</span>' +
       '<span class="gt-w">' + w + '</span>' +
       '<span class="gt-sub">' + esc(gearMeta(g)) + '</span>' +
-      '<span class="gt-p">' + CUR +  money2(gearPrice(g)) + '</span>' +
+      '<span class="gt-p">' + cash(gearPrice(g)) + '</span>' +
     '</div>';
   }
 
@@ -1142,7 +1549,7 @@
     return '<div class="g-list" data-open="' + g.id + '">' +
       '<span class="gl-ico" style="background:' + iconBg(mapGearCat(g)) + '">' + iconMarkup(g.iconImg || g.icon) + '</span>' +
       '<span class="gl-main"><b>' + esc(g.name) + '</b><small>' + esc(gearMeta(g)) + '</small></span>' +
-      '<span class="gl-side"><b>' + CUR +  money2(gearPrice(g)) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
+      '<span class="gl-side"><b>' + cash(gearPrice(g)) + '</b>' + (w ? '<small>' + w + '</small>' : '') + '</span>' +
     '</div>';
   }
 
@@ -1180,7 +1587,7 @@
         var w = gearWeight(g);
         if (w) { wsum += w; hasW = true; }
       });
-      var sumTxt = items.length + '件' + (hasW ? ' · ' + fmtWeight(wsum) : '') + ' · ' + CUR +  money2(sum);
+      var sumTxt = items.length + '件' + (hasW ? ' · ' + fmtWeight(wsum) : '') + ' · ' + cash(sum);
       return '<section class="gear-group' + (state.gearCollapsed[k] ? ' col' : '') + '">' +
         '<button class="gg-head" data-gcol="' + esc(k) + '">' +
           '<span class="gg-ico">' + catIcon(k) + '</span>' +
@@ -1198,6 +1605,14 @@
     }
 
     $('#gear-empty').classList.toggle('hidden', list.length > 0);
+    var gearEnd = $('#gear-end');
+    if (gearEnd) {
+      gearEnd.classList.toggle('hidden', list.length === 0);
+      gearEnd.innerHTML = '共 <b>' + list.length + '</b> 件装备 · 已经到底';
+    }
+    // 列表空的时候不显示底部说明，免得空页面上孤零零一行字
+    var gearNote = document.querySelector('#view-gear .note');
+    if (gearNote) gearNote.classList.toggle('hidden', list.length === 0);
     updateGearFilterBtn();
   }
 
@@ -1292,9 +1707,9 @@
     if (own && oc) {
       ownBlock = '<div class="g-block"><h3>我的使用情况</h3>' +
         '<div class="kv"><span>持有天数</span><b>' + oc.days + ' 天</b></div>' +
-        '<div class="kv"><span>计入成本</span><b>' + CUR +  money(oc.net) + '</b></div>' +
-        '<div class="kv"><span>日均</span><b>' + CUR +  money(oc.daily) + ' / 天</b></div>' +
-        '<div class="kv"><span>次均</span><b>' + (oc.perUse == null ? '开启后可算' : '' + CUR +  money(oc.perUse)) + '</b></div>' +
+        '<div class="kv"><span>计入成本</span><b>' + cash(oc.net) + '</b></div>' +
+        '<div class="kv"><span>日均</span><b>' + (oc.daily == null ? '数据不足' : cash(oc.daily) + ' / 天') + '</b></div>' +
+        '<div class="kv"><span>次均</span><b>' + (oc.perUse == null ? (own.trackPerUse ? '数据不足' : '未开启') : '' + cash(oc.perUse)) + '</b></div>' +
       '</div>';
     }
 
@@ -1307,7 +1722,7 @@
 
     // 已加入资产：主价格显示实付价，下面补一行参考价，方便对照
     var refLine = own && Number(g.refPrice) > 0
-      ? '<div class="g-price-sub">参考价 ' + CUR +  money2(g.refPrice) + '</div>'
+      ? '<div class="g-price-sub">参考价 ' + cash(g.refPrice) + '</div>'
       : '';
 
     $('#gdetail-body').innerHTML =
@@ -1315,7 +1730,7 @@
         (g.photo ? '<img class="g-photo" src="' + esc(g.photo) + '" alt="' + esc(g.name) + '">' : '') +
         (gcat ? '<div class="g-cat">' + esc(gcat) + '</div>' : '') +
         '<h2 class="g-name">' + esc(g.name) + '</h2>' +
-        '<div class="g-price">' + CUR +  money2(gearPrice(g)) + '<small>' + (own ? '实付价' : '参考价') + '</small></div>' +
+        '<div class="g-price">' + cash(gearPrice(g)) + '<small>' + (own ? '实付价' : '参考价') + '</small></div>' +
         refLine +
         tagBlock +
       '</div>' +
@@ -1370,6 +1785,8 @@
     renderFormPhoto('gear');
     $('#gicon-picker').classList.add('hidden');
     $('#btn-gdel').classList.toggle('hidden', !gear);
+    var gedDanger = $('#geditor-danger');
+    if (gedDanger) gedDanger.classList.toggle('hidden', !gear);
 
     var d = gear || {};
     f.elements.name.value = d.name || '';
@@ -1431,27 +1848,46 @@
     toast(idx >= 0 ? '装备已更新' : '装备已添加');
   }
 
-  function deleteGear() {
-    var g = DB.gear.find(function (x) { return x.id === state.editingGearId; });
+  function gearRefs(gearId) {
+    return DB.items.filter(function (it) {
+      return !it.deleted && it.catalogId === gearId;
+    });
+  }
+
+  /* 删除装备资料：只删卡，引用它的资产全部解绑、保留 */
+  function removeGear(gearId) {
+    var g = DB.gear.find(function (x) { return x.id === gearId; });
     if (!g) return;
-    var own = ownedItem(g.id);
-    var msg = own
-      ? '删除「' + g.name + '」？\n资产里的这条记录也会一起删除。\n只想移出资产、保留资料卡，请先在资产详情里点「移出资产」。'
-      : '删除「' + g.name + '」？';
-    if (!confirm(msg)) return;
+    var refs = gearRefs(gearId);
     var now = Date.now();
     g.deleted = true;
     g.updatedAt = now;
-    if (own) {
-      own.deleted = true;
-      own.catalogId = null;
-      own.updatedAt = now;
-    }
+    refs.forEach(function (it) {
+      it.catalogId = null;
+      it.updatedAt = now;
+    });
     saveAll();
+    closeSheet('#gdelete-sheet');
     closeSheet('#geditor-sheet');
+    closeSheet('#gsheet');
     renderGear();
     renderAssets();
-    toast(own ? '已删除，资产里的记录也一并移除' : '已删除装备');
+    if (refs.length) toast('已删除资料卡，' + refs.length + ' 件资产已解绑');
+    else toast('已删除装备资料');
+  }
+
+  function deleteGear() {
+    var g = DB.gear.find(function (x) { return x.id === state.editingGearId; });
+    if (!g) return;
+    var refs = gearRefs(g.id);
+    if (!refs.length) {
+      if (!confirm('删除「' + g.name + '」这张装备资料卡？')) return;
+      removeGear(g.id);
+      return;
+    }
+    $('#gdelete-name').textContent = '「' + g.name + '」';
+    $('#gdelete-sub').textContent = '该条目被 ' + refs.length + ' 件资产引用。删除资料卡后，资产会保留，只解除关联。';
+    openSheet('#gdelete-sheet');
   }
 
   /* 移出资产：删掉资产这条记录并解除关联，装备库资料卡保留 */
@@ -1485,7 +1921,7 @@
       return;
     }
 
-    var total = 0, daily = 0, count = 0, usedTotal = 0, costForUse = 0;
+    var total = 0, daily = 0, dailyKnown = 0, count = 0, usedTotal = 0, costForUse = 0;
     var byCat = {}, catQty = {};
     var overdue = [], perUse = [], lifeRows = [];
 
@@ -1493,9 +1929,14 @@
       var qty = Number(x.it.qty) || 1;
       var cat = x.it.cat || '其他';
       total += x.c.net;
-      daily += x.c.daily;
+      if (x.c.daily != null) { daily += x.c.daily; dailyKnown++; }
       count += qty;
-      if (x.c.perUse != null) { usedTotal += x.c.used; costForUse += x.c.net; perUse.push(x); }
+      if (x.c.used > 0) {
+        x.c.perUse = x.c.net / x.c.used;
+        usedTotal += x.c.used;
+        costForUse += x.c.net;
+        perUse.push(x);
+      }
       byCat[cat] = (byCat[cat] || 0) + x.c.net;
       catQty[cat] = (catQty[cat] || 0) + qty;
       if (x.c.overdue) overdue.push(x);
@@ -1503,6 +1944,48 @@
     });
 
     var avgPerUse = usedTotal ? costForUse / usedTotal : null;
+
+    /* 闲置率：服役超过 30 天，且 180 天内没有使用记录（含从未使用） */
+    var idleCandidates = items.filter(function (x) {
+      return x.it.status !== '已退役' && x.c.days > 30;
+    });
+    var idleList = idleCandidates.filter(function (x) {
+      var last = lastUsageDate(x.it.id);
+      return !last || diffDays(last) > 180;
+    });
+    var idleRate = idleCandidates.length ? Math.round(idleList.length / idleCandidates.length * 100) : 0;
+    var idleRows = idleList.slice().sort(function (a, b) {
+      return b.c.net - a.c.net;
+    }).slice(0, 5);
+    var idleHtml = idleRows.map(function (x) {
+      var last = lastUsageDate(x.it.id);
+      var when = last ? '上次使用 ' + diffDays(last) + ' 天前' : '从未使用';
+      return '<div class="st-idle-row">' +
+        '<span class="st-idle-ico" style="background:' + iconBg(x.it.cat) + '">' +
+          iconMarkup(x.it.iconImg || x.it.icon) + '</span>' +
+        '<div class="st-idle-main"><b>' + esc(x.it.name) + '</b><small>' + when + '</small></div>' +
+        '<span class="st-idle-money">' + cash(x.c.net) + '</span>' +
+      '</div>';
+    }).join('');
+
+    var tripRows = (DB.trips || []).filter(function (t) {
+      return t && !t.deleted && t.status === '已完成';
+    }).map(function (t) {
+      return { t: t, c: tripCost(t) };
+    }).filter(function (x) {
+      return !x.c.pending && x.c.total != null;
+    }).sort(function (a, b) {
+      return b.c.total - a.c.total;
+    }).slice(0, 5);
+    var tripRankHtml = tripRows.map(function (x) {
+      return '<div class="st-trip-row" data-trip="' + x.t.id + '">' +
+        '<span class="st-trip-ico">' + (TRIP_TYPE_ICON[x.t.type] || '🥾') + '</span>' +
+        '<div class="st-trip-main"><b>' + esc(x.t.name) + '</b><small>' +
+          tripDatesText(x.t) + ' · ' + (x.t.companions ? x.t.companions + ' 人' : '人数未填') + '</small></div>' +
+        '<div class="st-trip-side"><b>' + cash(x.c.total) + '</b><small>人均 ' +
+          (x.c.per == null ? '数据不足' : cash(x.c.per)) + '</small></div>' +
+      '</div>';
+    }).join('');
 
     /* 固定分类用固定色，自定义分类按名称散列，避免每次刷新换颜色 */
     var CAT_COLOR = {
@@ -1549,7 +2032,7 @@
       var raw = total ? r.amount / total * 100 : 0;
       var ptxt = raw >= 0.1 ? raw.toFixed(1) + '%' : (raw > 0 ? '<0.1%' : '0.0%');
       return '<li class="cc' + r.ci + '"><i></i><div><b>' + esc(r.name) + '</b><span>' +
-        CUR + money(r.amount) + ' · ' + ptxt + '</span></div></li>';
+        cash(r.amount) + ' · ' + ptxt + '</span></div></li>';
     }).join('');
 
     var catGridHtml = catRows.map(function (r) {
@@ -1562,7 +2045,7 @@
       return '<div class="st-cat cc' + r.ci + '">' +
         '<div class="st-cat-pct">' + ptxt + '</div>' +
         '<b>' + esc(r.name) + '</b>' +
-        '<span>' + r.qty + ' 件 · ' + CUR + money(r.amount) + '</span>' +
+        '<span>' + r.qty + ' 件 · ' + cash(r.amount) + '</span>' +
       '</div>';
     }).join('');
 
@@ -1571,7 +2054,7 @@
     function vsRows(list) {
       return list.map(function (x) {
         return '<div class="st-vs-row"><span>' + esc(x.it.name) + '</span><b>' +
-          CUR + money(x.c.perUse) + '</b></div>';
+          cash(x.c.perUse) + '</b></div>';
       }).join('');
     }
     if (pu.length >= 2) {
@@ -1583,7 +2066,7 @@
         '<div class="st-vs-col bad"><div class="st-vs-head"><i></i>最烧钱</div>' + vsRows(exp) + '</div>' +
       '</div>';
     } else {
-      vsHtml = '<div class="st-empty">开启至少 2 件物品的「计算单次使用」，才能做对比</div>';
+      vsHtml = '<div class="st-empty">至少 2 件装备有使用记录，才能做单次成本对比</div>';
     }
 
     lifeRows.sort(function (a, b) {
@@ -1643,17 +2126,17 @@
 
     var totalTxt = money(total);
     var dot = totalTxt.lastIndexOf('.');
-    var heroMain = totalTxt.slice(0, dot);
-    var heroDec = totalTxt.slice(dot);
+    var heroMain = dot >= 0 ? totalTxt.slice(0, dot) : totalTxt;
+    var heroDec = dot >= 0 ? totalTxt.slice(dot) : '';
 
     $('#stats-body').innerHTML =
       '<div class="st-hero">' +
         '<div class="st-hero-blob"></div>' +
         '<div class="st-hero-top"><span>资产总计</span><span class="st-hero-tag">' + count + ' 件</span></div>' +
-        '<div class="st-hero-num">' + CUR + heroMain + '<small>' + heroDec + '</small></div>' +
+        '<div class="st-hero-num">' + '<span class="cur">' + CUR + '</span>' + heroMain + '<small>' + heroDec + '</small></div>' +
         '<div class="st-hero-grid">' +
-          '<div><b>' + CUR + money(daily) + '</b><span>总日均 / 天</span></div>' +
-          '<div><b>' + (avgPerUse == null ? '—' : CUR + money(avgPerUse)) + '</b><span>整体次均</span></div>' +
+          '<div><b>' + (dailyKnown ? cash(daily) : '数据不足') + '</b><span>总日均 / 天</span></div>' +
+          '<div><b>' + (avgPerUse == null ? '数据不足' : cash(avgPerUse)) + '</b><span>整体次均</span></div>' +
           '<div><b>' + overdue.length + ' 件</b><span>超期物品</span></div>' +
         '</div>' +
       '</div>' +
@@ -1666,8 +2149,21 @@
         '<div class="st-cat-grid">' + catGridHtml + '</div>' +
       '</div>' +
       '<div class="panel st-panel-vs">' +
-        '<h3>最划算 / 最烧钱</h3><p class="sub">按单次使用成本排 · 越少越划算</p>' +
+        '<h3>单次成本排行</h3><p class="sub">按累计使用次数摊薄 · 越少越划算</p>' +
         vsHtml +
+      '</div>' +
+      '<div class="panel st-panel-idle">' +
+        '<div class="st-head"><div><h3>闲置率</h3><p class="sub">服役超过 30 天，180 天内没用过</p></div>' +
+          '<span class="st-chip' + (idleRate >= 50 ? ' bad' : '') + '">' + idleRate + '%</span></div>' +
+        '<div class="st-idle-hero"><b>' + idleRate + '%</b><span>' +
+          idleList.length + ' / ' + idleCandidates.length + ' 件长期闲置</span></div>' +
+        (idleHtml || '<div class="st-empty">' +
+          (idleCandidates.length ? '没有长期闲置的物品，状态不错' : '服役超过 30 天的物品还不多，暂时无法统计') +
+        '</div>') +
+      '</div>' +
+      '<div class="panel st-panel-trips">' +
+        '<h3>行程花费排行</h3><p class="sub">只统计已完成的行程 · 装备按实际使用摊入</p>' +
+        (tripRankHtml || '<div class="st-empty">还没有已完成的行程，完成后这里会按花费排名</div>') +
       '</div>' +
       '<div class="panel st-panel-life">' +
         '<div class="st-head"><div><h3>寿命进度</h3><p class="sub">已持有 / 计划使用年限，超期标红</p></div>' +
@@ -1689,7 +2185,7 @@
       window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', dark ? '#101218' : '#f5f6fa');
+    if (meta) meta.setAttribute('content', dark ? '#17130e' : '#f7f1e3');
   }
   function setTheme(v) {
     try { localStorage.setItem(LS_THEME, v); } catch (e) {}
@@ -2325,6 +2821,7 @@
     var view = $('#view-' + name);
     if (view) view.classList.remove('hidden');
     if (name === 'gear') renderGear();
+    if (name === 'trips') renderTrips();
     if (name === 'stats') renderStats();
     if (name === 'assets') renderAssets();
     if (name === 'mine') renderMine();
@@ -2385,10 +2882,19 @@
       // 云端只有真实记录；合并时本地示例继续留在本机展示、不上传
       DB.items = mergeById(DB.items, merged.items);
       DB.gear = mergeById(DB.gear, merged.gear);
+      DB.trips = mergeById(DB.trips, merged.trips);
+      DB.tripGear = mergeById(DB.tripGear, merged.tripGear);
+      DB.usage = mergeById(DB.usage, merged.usage);
+      DB.templates = mergeById(DB.templates, merged.templates);
+      ensureUsageData();
       try {
-        localStorage.setItem(LS, JSON.stringify({ items: DB.items, gear: DB.gear }));
+        localStorage.setItem(LS, JSON.stringify({
+          items: DB.items, gear: DB.gear, trips: DB.trips,
+          tripGear: DB.tripGear, usage: DB.usage, templates: DB.templates
+        }));
       } catch (e) {}
-      renderAssets(); renderGear(); renderStats();
+      usageCountCache = null;
+      renderAssets(); renderGear(); renderTrips(); renderStats();
       if (manual) toast('同步完成');
     });
   }
@@ -2461,7 +2967,7 @@
     var head = ['名称', '分类', '购买日期', '价格', '数量', '附加', '单位', '数量单位', '状态', '已用次数', '备注'];
     var rows = DB.items.filter(function (it) { return !it.deleted && !it.demo; }).map(function (it) {
       return [it.name, it.cat, it.purchaseDate, it.price, it.qty, it.extra || 0,
-              it.lifeValue || 0, it.lifeUnit, it.status, it.baseCount || 0, it.notes || ''];
+              it.lifeValue || 0, it.lifeUnit, it.status, calc(it).used, it.notes || ''];
     });
     var csv = '\ufeff' + [head].concat(rows).map(function (r) { return r.map(csvEscape).join(','); }).join('\n');
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -2529,8 +3035,9 @@
         });
         n++;
       }
+      ensureUsageData();
       saveAll();
-      renderAssets(); renderGear(); renderStats();
+      renderAssets(); renderGear(); renderTrips(); renderStats();
       toast('已导入 ' + n + ' 条' + (skip ? '，跳过重复 ' + skip + ' 条' : ''));
     };
     reader.readAsText(file);
@@ -2564,10 +3071,14 @@
   function exportBackup() {
     var data = {
       app: 'gear-ledger',
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
       items: DB.items,
-      gear: DB.gear
+      gear: DB.gear,
+      trips: DB.trips,
+      tripGear: DB.tripGear,
+      usage: DB.usage,
+      templates: DB.templates
     };
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     var a = document.createElement('a');
@@ -2594,6 +3105,10 @@
 
       var items = (data.items || []).filter(function (x) { return x && typeof x === 'object'; });
       var gear = (data.gear || []).filter(function (x) { return x && typeof x === 'object'; });
+      var trips = (data.trips || []).filter(function (x) { return x && typeof x === 'object'; });
+      var tripGear = (data.tripGear || []).filter(function (x) { return x && typeof x === 'object'; });
+      var usage = (data.usage || []).filter(function (x) { return x && typeof x === 'object'; });
+      var templates = (data.templates || []).filter(function (x) { return x && typeof x === 'object'; });
       items.forEach(function (x) {
         if (!x.id) x.id = uid();
         if (!Array.isArray(x.useLog)) x.useLog = [];
@@ -2604,13 +3119,22 @@
         if (!Array.isArray(x.specs)) x.specs = [];
         if (!Array.isArray(x.perf)) x.perf = [];
       });
+      trips.forEach(function (x) { if (!x.id) x.id = uid(); });
+      tripGear.forEach(function (x) { if (!x.id) x.id = uid(); });
+      usage.forEach(function (x) { if (!x.id) x.id = uid(); });
+      templates.forEach(function (x) { if (!x.id) x.id = uid(); });
 
       DB.items = mergeById(DB.items, items);
       DB.gear = mergeById(DB.gear, gear);
+      DB.trips = mergeById(DB.trips, trips);
+      DB.tripGear = mergeById(DB.tripGear, tripGear);
+      DB.usage = mergeById(DB.usage, usage);
+      DB.templates = mergeById(DB.templates, templates);
       normalizeGearData(DB.gear, DB.items);
+      ensureUsageData();
       saveAll();
-      renderAssets(); renderGear(); renderStats();
-      toast('已导入备份：物品 ' + items.length + ' 条，装备 ' + gear.length + ' 件');
+      renderAssets(); renderGear(); renderTrips(); renderStats();
+      toast('已导入备份：物品 ' + items.length + ' 条，装备 ' + gear.length + ' 件，行程 ' + trips.length + ' 条');
     };
     reader.readAsText(file);
   }
@@ -2652,6 +3176,1070 @@
     el.addEventListener('click', function (e) {
       if (e.target === el) el.remove();
     });
+  }
+
+  /* =========================================================
+     行程
+     ========================================================= */
+  function tripById(id) {
+    return (DB.trips || []).find(function (t) { return t && t.id === id && !t.deleted; }) || null;
+  }
+  function tripGearOf(tripId) {
+    return (DB.tripGear || []).filter(function (g) {
+      return g && !g.deleted && g.tripId === tripId;
+    });
+  }
+  function tripGearFor(tripId, assetId) {
+    return tripGearOf(tripId).find(function (g) { return g.assetId === assetId; }) || null;
+  }
+  function usageForTrip(tripId) {
+    return (DB.usage || []).filter(function (u) {
+      return u && !u.deleted && u.tripId === tripId;
+    });
+  }
+  function assetById(id) {
+    return (DB.items || []).find(function (it) { return it && it.id === id; }) || null;
+  }
+  function assetWeightOf(it) {
+    if (!it) return 0;
+    if (Number(it.weight)) return Number(it.weight);
+    if (it.catalogId) {
+      var g = (DB.gear || []).find(function (x) { return x.id === it.catalogId && !x.deleted; });
+      if (g && Number(g.weight)) return Number(g.weight);
+    }
+    return 0;
+  }
+  function tripWeight(tripId, plannedOnly) {
+    return tripGearOf(tripId).filter(function (g) {
+      return !plannedOnly || g.planned;
+    }).reduce(function (sum, g) {
+      return sum + assetWeightOf(assetById(g.assetId));
+    }, 0);
+  }
+  function shortDate(s) {
+    var d = parseDate(s);
+    if (!d) return '—';
+    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+  }
+  function tripDatesText(t) {
+    if (!t) return '—';
+    if (t.startDate === t.endDate) return shortDate(t.startDate);
+    return shortDate(t.startDate) + ' – ' + shortDate(t.endDate);
+  }
+  function tripDayCount(t) {
+    return diffDays(t.startDate, t.endDate) + 1;
+  }
+  function costText(v, pending) {
+    if (pending) return '待完成';
+    if (v == null) return '数据不足';
+    return cash(v);
+  }
+  function tripCost(t) {
+    if (!t) {
+      return { gear: null, extra: 0, total: null, per: null, missing: true, used: 0, pending: false };
+    }
+    var gear = 0, missing = false, used = 0;
+    tripGearOf(t.id).forEach(function (g) {
+      if (!g.actualUse) return;
+      var it = assetById(g.assetId);
+      var uc = unitCostOf(it);
+      if (uc == null) { missing = true; }
+      else { gear += uc; used++; }
+    });
+    var extra = num(t.transportCost) + num(t.lodgingCost) + num(t.otherCost);
+    var total = missing ? null : gear + extra;
+    var companions = Number(t.companions) || 0;
+    var per = (companions > 0 && total != null) ? total / companions : null;
+    return {
+      gear: missing ? null : gear,
+      extra: extra,
+      total: total,
+      per: per,
+      missing: missing,
+      used: used,
+      pending: t.status !== '已完成'
+    };
+  }
+
+  function filteredTrips() {
+    return (DB.trips || []).filter(function (t) {
+      if (!t || t.deleted) return false;
+      if (state.tripStatus !== '全部' && t.status !== state.tripStatus) return false;
+      return true;
+    }).sort(function (a, b) {
+      return String(b.startDate || '').localeCompare(String(a.startDate || '')) ||
+        (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+  }
+
+  function renderTrips() {
+    $$('[data-tripsub]').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-tripsub') === state.tripSub);
+    });
+    var panels = {
+      trips: $('#trip-panel-trips'),
+      usage: $('#trip-panel-usage'),
+      templates: $('#trip-panel-templates')
+    };
+    Object.keys(panels).forEach(function (k) {
+      if (panels[k]) panels[k].classList.toggle('hidden', k !== state.tripSub);
+    });
+    if (state.tripSub === 'usage') renderUsage();
+    else if (state.tripSub === 'templates') renderTemplates();
+    else renderTripList();
+  }
+
+  function renderTripList() {
+    var box = $('#trip-list');
+    if (!box) return;
+    var chips = ['全部'].concat(TRIP_STATUSES).map(function (s) {
+      return '<button class="chip ' + (state.tripStatus === s ? 'on' : '') +
+        '" data-tripstatus="' + s + '">' + s + '</button>';
+    }).join('');
+    var chipsBox = $('#trip-chips');
+    if (chipsBox) {
+      chipsBox.innerHTML = chips;
+      syncChips(chipsBox);
+    }
+
+    var list = filteredTrips();
+    box.innerHTML = list.map(function (t) {
+      var tc = tripCost(t);
+      var gearCount = tripGearOf(t.id).length;
+      var weight = tripWeight(t.id);
+      var cost = tc.pending ? '待核算' : (tc.total == null ? '数据不足' : cash(tc.total));
+      return '<article class="trip-card status-' + (TRIP_STATUS_CLASS[t.status] || 'plan') + '" data-trip="' + t.id + '">' +
+        '<div class="trip-card-top">' +
+          '<span class="trip-card-ico">' + (TRIP_TYPE_ICON[t.type] || '🥾') + '</span>' +
+          '<div class="trip-card-main">' +
+            '<h3>' + esc(t.name) + '</h3>' +
+            '<p>' + tripDatesText(t) + ' · ' + esc(t.type) + '</p>' +
+          '</div>' +
+          '<span class="trip-status ' + (TRIP_STATUS_CLASS[t.status] || 'plan') + '">' + esc(t.status) + '</span>' +
+        '</div>' +
+        '<div class="trip-card-foot">' +
+          '<span>🎒 ' + gearCount + ' 件' + (weight ? ' · ' + fmtWeight(weight) : '') + '</span>' +
+          '<span>总成本 <b>' + cost + '</b></span>' +
+        '</div>' +
+      '</article>';
+    }).join('');
+
+    var empty = $('#trip-empty');
+    if (empty) {
+      var phoneLayout = window.matchMedia && window.matchMedia('(max-width: 699px)').matches;
+      empty.classList.toggle('hidden', list.length > 0);
+      empty.innerHTML = '<div class="empty-ico">🥾</div>' +
+        '<p>' + ((DB.trips || []).some(function (t) { return t && !t.deleted; }) ? '这个状态没有行程' : '还没有行程') + '</p>' +
+        '<span>' + (state.tripStatus !== '全部'
+          ? '换个状态看看，或新建一次出行'
+          : (phoneLayout ? '点下面的「新建行程」，把下一次出门记下来' : '点右上角的「新建行程」，把下一次出门记下来')) + '</span>';
+    }
+  }
+
+  function openTripEditor(t) {
+    state.tripEditingId = t ? t.id : null;
+    var f = $('#trip-form');
+    if (!f) return;
+    var el = f.elements;
+    el.type.innerHTML = TRIP_TYPES.map(function (x) { return '<option>' + x + '</option>'; }).join('');
+    el.status.innerHTML = TRIP_STATUSES.map(function (x) { return '<option>' + x + '</option>'; }).join('');
+    $('#trip-editor-title').textContent = t ? '编辑行程' : '新建行程';
+    el.name.value = t ? t.name : '';
+    el.startDate.value = t ? t.startDate : todayStr();
+    el.endDate.value = t ? t.endDate : todayStr();
+    el.type.value = t ? t.type : TRIP_TYPES[0];
+    el.status.value = t ? t.status : '计划中';
+    el.companions.value = t && t.companions ? t.companions : '';
+    el.location.value = t ? (t.location || '') : '';
+    el.route.value = t ? (t.route || '') : '';
+    el.weather.value = t ? (t.weather || '') : '';
+    el.transport.value = t ? (t.transport || '') : '';
+    el.transportCost.value = t && t.transportCost ? t.transportCost : '';
+    el.lodging.value = t ? (t.lodging || '') : '';
+    el.lodgingCost.value = t && t.lodgingCost ? t.lodgingCost : '';
+    el.otherCost.value = t && t.otherCost ? t.otherCost : '';
+    el.notes.value = t ? (t.notes || '') : '';
+    renderTripTemplateHint(t ? false : true);
+    openSheet('#trip-editor-sheet');
+  }
+
+  function renderTripTemplateHint(defaultChecked) {
+    var f = $('#trip-form');
+    if (!f) return;
+    var sec = $('#trip-template-sec');
+    var card = $('#trip-template-card');
+    var sel = f.elements.templateId;
+    var type = f.elements.type.value;
+    var list = (DB.templates || []).filter(function (t) {
+      return t && !t.deleted && t.tripType === type;
+    });
+    if (!list.length) {
+      if (sec) sec.classList.add('hidden');
+      if (card) card.classList.add('hidden');
+      f.elements.applyTemplate.checked = false;
+      sel.innerHTML = '';
+      return;
+    }
+    if (sec) sec.classList.remove('hidden');
+    if (card) card.classList.remove('hidden');
+    var keep = sel.value;
+    sel.innerHTML = list.map(function (t) {
+      return '<option value="' + t.id + '">' + esc(t.name) + (t.system ? ' · 系统预置' : '') + '</option>';
+    }).join('');
+    if (list.some(function (t) { return t.id === keep; })) sel.value = keep;
+    f.elements.applyTemplate.checked = defaultChecked !== false;
+    var tip = $('#trip-template-tip');
+    if (tip) {
+      tip.textContent = defaultChecked === false
+        ? '套用后会补充模板里的物品，已经添加过的不会重复。'
+        : '保存后会按模板生成清单；没匹配到资产的物品会提示你。';
+    }
+  }
+
+  function saveTripEditor(e) {
+    e.preventDefault();
+    var f = $('#trip-form');
+    var el = f.elements;
+    var name = String(el.name.value || '').trim();
+    var start = el.startDate.value;
+    var end = el.endDate.value;
+    if (!name) { toast('请填写行程名称'); el.name.focus(); return; }
+    if (!start || !end) { toast('请选择出发和返回日期'); return; }
+    if (end < start) { toast('返回日期不能早于出发日期'); return; }
+
+    var existing = state.tripEditingId ? (DB.trips || []).find(function (t) { return t.id === state.tripEditingId; }) : null;
+    var prevStatus = existing ? existing.status : '计划中';
+    var selectedStatus = el.status.value;
+    var needConfirm = false;
+
+    if (prevStatus === '已完成' && selectedStatus !== '已完成' && usageForTrip(existing.id).length) {
+      if (!window.confirm('改成未完成不会自动删除已经生成的使用记录。需要撤销请在行程详情里操作。继续吗？')) return;
+    }
+    if (selectedStatus === '已完成' && prevStatus !== '已完成') {
+      selectedStatus = '进行中';
+      needConfirm = true;
+    }
+
+    var now = Date.now();
+    var trip = existing || { id: uid(), createdAt: now, deleted: false };
+    trip.name = name;
+    trip.startDate = start;
+    trip.endDate = end;
+    trip.type = el.type.value;
+    trip.location = String(el.location.value || '').trim();
+    trip.route = String(el.route.value || '').trim();
+    trip.weather = String(el.weather.value || '').trim();
+    trip.transport = String(el.transport.value || '').trim();
+    trip.transportCost = num(el.transportCost.value);
+    trip.lodging = String(el.lodging.value || '').trim();
+    trip.lodgingCost = num(el.lodgingCost.value);
+    trip.otherCost = num(el.otherCost.value);
+    trip.companions = Math.max(0, Math.floor(num(el.companions.value)));
+    trip.notes = String(el.notes.value || '').trim();
+    trip.status = selectedStatus;
+    trip.updatedAt = now;
+    if (!existing) DB.trips.unshift(trip);
+
+    var apply = el.applyTemplate && el.applyTemplate.checked;
+    if (apply && el.templateId.value) {
+      var tpl = (DB.templates || []).find(function (x) { return x.id === el.templateId.value && !x.deleted; });
+      if (tpl) {
+        var added = applyTemplateToTrip(trip, tpl);
+        if (added.misses.length) {
+          toast('模板已套用，' + added.misses.length + ' 项没匹配到资产');
+        }
+      }
+    }
+
+    saveAll();
+    closeSheet('#trip-editor-sheet');
+    renderTrips();
+    renderStats();
+
+    if (!needConfirm && selectedStatus === '已取消' && prevStatus !== '已取消' && usageForTrip(trip.id).length) {
+      if (window.confirm('这个行程已经生成过使用记录，要一起回滚吗？')) rollbackTripUsage(trip.id);
+    }
+    openTrip(trip.id);
+    if (needConfirm) openTripConfirm(trip.id);
+  }
+
+  function templateResolveAsset(item) {
+    if (!item) return null;
+    if (item.assetId) {
+      var a = assetById(item.assetId);
+      if (a && !a.deleted) return a;
+    }
+    if (item.gearId) {
+      var owned = (DB.items || []).find(function (it) { return it.catalogId === item.gearId && !it.deleted; });
+      if (owned) return owned;
+    }
+    var name = String(item.name || '').trim();
+    if (!name) return null;
+    var exact = (DB.items || []).find(function (it) { return !it.deleted && it.name === name; });
+    if (exact) return exact;
+    var fuzzy = (DB.items || []).find(function (it) {
+      return !it.deleted && (it.name.indexOf(name) >= 0 || name.indexOf(it.name) >= 0);
+    });
+    if (fuzzy) return fuzzy;
+    var g = (DB.gear || []).find(function (x) { return !x.deleted && x.name === name; });
+    if (g) {
+      var linked = (DB.items || []).find(function (it) { return it.catalogId === g.id && !it.deleted; });
+      if (linked) return linked;
+    }
+    return null;
+  }
+
+  function applyTemplateToTrip(trip, tpl) {
+    var now = Date.now();
+    var misses = [], added = 0;
+    (tpl.items || []).forEach(function (item) {
+      var asset = templateResolveAsset(item);
+      if (!asset) {
+        if (item.name) misses.push(item.name);
+        return;
+      }
+      if (tripGearFor(trip.id, asset.id)) return;
+      DB.tripGear.push({
+        id: uid(),
+        tripId: trip.id,
+        assetId: asset.id,
+        assetName: asset.name,
+        source: '模板带入',
+        planned: !!item.required,
+        actualCarry: null,
+        actualUse: null,
+        useIncrement: 1,
+        notes: item.notes || '',
+        updatedAt: now,
+        deleted: false
+      });
+      added++;
+    });
+    trip.templateMisses = misses;
+    trip.templateAdded = added;
+    trip.updatedAt = now;
+    return { added: added, misses: misses };
+  }
+
+  function openTrip(id) {
+    state.tripId = id;
+    renderTripDetail();
+    openSheet('#trip-sheet');
+  }
+
+  function renderTripDetail() {
+    var t = tripById(state.tripId);
+    if (!t) { closeSheet('#trip-sheet'); return; }
+    var gears = tripGearOf(t.id);
+    var plannedGears = gears.filter(function (g) { return g.planned; });
+    var plannedCount = plannedGears.length;
+    var missingWeight = plannedGears.filter(function (g) { return !assetWeightOf(assetById(g.assetId)); }).length;
+    var weight = tripWeight(t.id, true);
+    var tc = tripCost(t);
+    var statusCls = TRIP_STATUS_CLASS[t.status] || 'plan';
+    var gearHtml = gears.map(function (g) {
+      var it = assetById(g.assetId);
+      var name = it ? it.name : (g.assetName || '已删除的资产');
+      var w = assetWeightOf(it);
+      var uc = unitCostOf(it);
+      var flags = '';
+      if (t.status === '已完成') {
+        flags = '<div class="trip-flags">' +
+          '<span class="trip-flag ' + (g.actualCarry ? 'on' : '') + '">' +
+            (g.actualCarry ? '已携带' : (g.actualCarry === false ? '未携带' : '携带未确认')) + '</span>' +
+          '<span class="trip-flag use ' + (g.actualUse ? 'on' : '') + '">' +
+            (g.actualUse ? '已使用 ×' + (g.useIncrement || 1) : '未使用') + '</span>' +
+        '</div>';
+      }
+      return '<div class="trip-gear-row">' +
+        '<span class="trip-gear-ico" style="background:' + iconBg(it ? it.cat : '') + '">' +
+          iconMarkup(it ? (it.iconImg || it.icon) : '📦') + '</span>' +
+        '<div class="trip-gear-main">' +
+          '<b>' + esc(name) + '</b>' +
+          '<small>' + esc(g.source) + ' · ' + (g.planned ? '计划携带' : '未计划') +
+            (w ? ' · ' + fmtWeight(w) : '') + '</small>' +
+          flags +
+        '</div>' +
+        '<div class="trip-gear-side"><b>' + (uc == null ? '数据不足' : cash(uc)) + '</b><small>单次成本</small></div>' +
+        '<button class="trip-gear-x" data-trip-gear-del="' + g.id + '" title="移除">×</button>' +
+      '</div>';
+    }).join('');
+
+    var missHtml = (t.templateMisses && t.templateMisses.length)
+      ? '<div class="trip-miss">模板里有 ' + t.templateMisses.length + ' 项没匹配到资产：' +
+        esc(t.templateMisses.join('、')) + '<br><span>先到「资产」里补上这些物品，再回来添加。</span></div>'
+      : '';
+
+    var tripUsage = usageForTrip(t.id);
+    var usageHtml = tripUsage.map(function (u) {
+      var it = assetById(u.assetId);
+      return '<div class="usage-mini">' +
+        '<div class="usage-mini-main"><b>' + esc(it ? it.name : (u.assetName || '已删除的资产')) + '</b>' +
+          '<small>' + fmtDate(u.date) + ' · ×' + (u.count || 1) + (u.notes ? ' · ' + esc(u.notes) : '') + '</small></div>' +
+        '<button class="text-btn danger" data-usage-del="' + u.id + '">撤销</button>' +
+      '</div>';
+    }).join('');
+
+    var meta = [];
+    if (t.location) meta.push('📍 ' + esc(t.location));
+    if (t.weather) meta.push('🌤 ' + esc(t.weather));
+    if (t.companions) meta.push('👥 ' + t.companions + ' 人');
+    meta.push('🗓 ' + tripDayCount(t) + ' 天');
+
+    var extras = [];
+    if (t.transport || t.transportCost) extras.push('交通：' + (t.transport ? esc(t.transport) + ' · ' : '') + cash(t.transportCost));
+    if (t.lodging || t.lodgingCost) extras.push('住宿：' + (t.lodging ? esc(t.lodging) + ' · ' : '') + cash(t.lodgingCost));
+    if (t.otherCost) extras.push('其他：' + cash(t.otherCost));
+
+    var costHtml =
+      '<div class="trip-cost-row"><span>装备成本' + (tc.used ? ' · ' + tc.used + ' 件实际使用' : '') + '</span><b>' +
+        costText(tc.gear, tc.pending) + '</b></div>' +
+      '<div class="trip-cost-row"><span>交通</span><b>' + cash(t.transportCost) + '</b></div>' +
+      '<div class="trip-cost-row"><span>住宿</span><b>' + cash(t.lodgingCost) + '</b></div>' +
+      '<div class="trip-cost-row"><span>其他</span><b>' + cash(t.otherCost) + '</b></div>' +
+      '<div class="trip-cost-row total"><span>总成本</span><b>' + costText(tc.total, tc.pending) + '</b></div>' +
+      '<div class="trip-cost-row"><span>人均' + (t.companions ? ' · ' + t.companions + ' 人' : '') + '</span><b>' +
+        (tc.pending ? '待完成' : (tc.per == null ? '数据不足' : cash(tc.per))) + '</b></div>' +
+      (extras.length ? '<p class="trip-cost-note">' + extras.join('<br>') + '</p>' : '');
+
+    $('#trip-detail-body').innerHTML =
+      '<div class="trip-hero">' +
+        '<div class="trip-hero-top">' +
+          '<span class="trip-hero-ico">' + (TRIP_TYPE_ICON[t.type] || '🥾') + '</span>' +
+          '<div class="trip-hero-main"><h2>' + esc(t.name) + '</h2>' +
+            '<p>' + tripDatesText(t) + ' · ' + esc(t.type) + '</p></div>' +
+          '<span class="trip-status ' + statusCls + '">' + esc(t.status) + '</span>' +
+        '</div>' +
+        '<div class="trip-hero-meta">' + meta.map(function (m) { return '<span>' + m + '</span>'; }).join('') + '</div>' +
+      '</div>' +
+      '<div class="trip-actions">' +
+        '<button class="trip-act" data-trip-edit="' + t.id + '">编辑行程</button>' +
+        ((t.status === '计划中' || t.status === '进行中')
+          ? '<button class="trip-act" data-trip-cancel="' + t.id + '">取消行程</button>' : '') +
+        '<button class="trip-act danger" data-trip-delete="' + t.id + '">删除行程</button>' +
+      '</div>' +
+      '<div class="trip-section">' +
+        '<div class="trip-section-head"><div><h3>装备清单</h3><p>共 ' + gears.length + ' 件 · 计划携带 ' +
+          plannedCount + ' 件' + (weight ? ' · 计划总重 ' + fmtWeight(weight) : '') + '</p></div>' +
+          '<button class="text-btn" data-trip-add-gear="1">+ 添加装备</button></div>' +
+        (gearHtml || '<div class="trip-empty-inline">还没有装备。可以套用模板，或从资产里添加。</div>') +
+        missHtml +
+        (missingWeight ? '<div class="trip-miss">有 ' + missingWeight +
+          ' 件装备还没填重量，计划总重未计入。<br><span>到资产详情里补上重量即可，不影响保存。</span></div>' : '') +
+      '</div>' +
+      '<div class="trip-section">' +
+        '<div class="trip-section-head"><div><h3>费用</h3><p>装备按实际使用摊到这一次</p></div></div>' +
+        costHtml +
+      '</div>' +
+      (usageHtml ? '<div class="trip-section"><div class="trip-section-head"><div><h3>已生成使用记录</h3>' +
+        '<p>撤销后，资产累计次数会同步回滚</p></div></div>' + usageHtml + '</div>' : '') +
+      ((t.route || t.notes) ? '<div class="trip-section"><div class="trip-section-head"><div><h3>路线与备注</h3></div></div>' +
+        (t.route ? '<p class="trip-text">' + esc(t.route) + '</p>' : '') +
+        (t.notes ? '<p class="trip-text">' + esc(t.notes) + '</p>' : '') + '</div>' : '') +
+      '<div style="height:8px"></div>';
+
+    var main = $('#trip-detail-main');
+    if (main) {
+      main.className = 'btn-main';
+      main.removeAttribute('data-trip-start');
+      main.removeAttribute('data-trip-confirm');
+      main.removeAttribute('data-trip-reopen');
+      if (t.status === '计划中') {
+        main.textContent = '开始行程';
+        main.setAttribute('data-trip-start', t.id);
+      } else if (t.status === '进行中') {
+        main.textContent = '完成行程';
+        main.setAttribute('data-trip-confirm', t.id);
+      } else if (t.status === '已完成') {
+        main.textContent = '调整实际使用';
+        main.setAttribute('data-trip-confirm', t.id);
+      } else {
+        main.textContent = '恢复为计划中';
+        main.setAttribute('data-trip-reopen', t.id);
+      }
+    }
+  }
+
+  function startTrip(id) {
+    var t = tripById(id);
+    if (!t) return;
+    t.status = '进行中';
+    t.updatedAt = Date.now();
+    saveAll();
+    renderTrips();
+    renderStats();
+    openTrip(id);
+    toast('行程已开始');
+  }
+
+  function reopenTrip(id) {
+    var t = tripById(id);
+    if (!t) return;
+    t.status = '计划中';
+    t.updatedAt = Date.now();
+    saveAll();
+    renderTrips();
+    renderStats();
+    openTrip(id);
+    toast('已恢复为计划中');
+  }
+
+  function rollbackTripUsage(tripId) {
+    var now = Date.now();
+    (DB.usage || []).forEach(function (u) {
+      if (u && !u.deleted && u.tripId === tripId) {
+        u.deleted = true;
+        u.updatedAt = now;
+      }
+    });
+    tripGearOf(tripId).forEach(function (g) {
+      g.actualUse = false;
+      g.updatedAt = now;
+    });
+    saveAll();
+  }
+
+  function cancelTrip(id) {
+    var t = tripById(id);
+    if (!t) return;
+    if (usageForTrip(id).length) {
+      if (window.confirm('这个行程已经生成过使用记录，要一起回滚吗？')) rollbackTripUsage(id);
+    }
+    t.status = '已取消';
+    t.updatedAt = Date.now();
+    saveAll();
+    renderTrips();
+    renderStats();
+    openTrip(id);
+    toast('行程已取消');
+  }
+
+  function removeTripGear(id) {
+    var g = (DB.tripGear || []).find(function (x) { return x.id === id && !x.deleted; });
+    if (!g) return;
+    var rec = (DB.usage || []).find(function (u) {
+      return !u.deleted && u.tripId === g.tripId && u.assetId === g.assetId;
+    });
+    if (rec && !window.confirm('这件装备已经生成本次使用记录，移除会一并撤销。继续吗？')) return;
+    var now = Date.now();
+    if (rec) { rec.deleted = true; rec.updatedAt = now; }
+    g.deleted = true;
+    g.actualUse = false;
+    g.updatedAt = now;
+    saveAll();
+    renderTripDetail();
+    renderTrips();
+    renderStats();
+    toast('已从清单移除');
+  }
+
+  function openTripConfirm(id) {
+    state.confirmTripId = id;
+    renderTripConfirm();
+    openSheet('#trip-confirm-sheet');
+  }
+
+  function renderTripConfirm() {
+    var t = tripById(state.confirmTripId);
+    if (!t) { closeSheet('#trip-confirm-sheet'); return; }
+    var gears = tripGearOf(t.id);
+    $('#trip-confirm-sub').textContent = t.name + ' · 勾选实际携带和实际使用的装备';
+    $('#trip-confirm-list').innerHTML = gears.length ? gears.map(function (g) {
+      var it = assetById(g.assetId);
+      var name = it ? it.name : (g.assetName || '已删除的资产');
+      var carry = g.actualCarry == null ? !!g.planned : !!g.actualCarry;
+      var use = !!g.actualUse;
+      return '<div class="confirm-row">' +
+        '<div class="confirm-main"><b>' + esc(name) + '</b><small>' + esc(g.source) +
+          (g.planned ? ' · 计划携带' : ' · 未计划') + '</small></div>' +
+        '<div class="confirm-checks">' +
+          '<label class="confirm-check"><input type="checkbox" data-confirm-carry="' + g.id + '"' +
+            (carry ? ' checked' : '') + '> 携带</label>' +
+          '<label class="confirm-check"><input type="checkbox" data-confirm-use="' + g.id + '"' +
+            (use ? ' checked' : '') + '> 使用</label>' +
+          '<label class="confirm-inc">次数 <input type="number" min="1" step="1" inputmode="numeric" data-confirm-inc="' +
+            g.id + '" value="' + (g.useIncrement || 1) + '"></label>' +
+        '</div>' +
+      '</div>';
+    }).join('') : '<div class="trip-empty-inline">这个行程还没有装备，直接确认也可以完成。</div>';
+  }
+
+  function confirmTrip() {
+    var t = tripById(state.confirmTripId);
+    if (!t) return;
+    var gears = tripGearOf(t.id);
+    var now = Date.now();
+    gears.forEach(function (g) {
+      var carryEl = $('[data-confirm-carry="' + g.id + '"]');
+      var useEl = $('[data-confirm-use="' + g.id + '"]');
+      var incEl = $('[data-confirm-inc="' + g.id + '"]');
+      var carry = carryEl ? carryEl.checked : !!g.actualCarry;
+      var use = useEl ? useEl.checked : !!g.actualUse;
+      if (use) carry = true;
+      var inc = Math.max(1, Math.floor(Number(incEl ? incEl.value : g.useIncrement) || 1));
+      g.actualCarry = carry;
+      g.actualUse = use;
+      g.useIncrement = inc;
+      g.updatedAt = now;
+
+      var matches = (DB.usage || []).filter(function (u) {
+        return u && u.tripId === t.id && u.assetId === g.assetId;
+      });
+      var rec = matches.find(function (u) { return !u.deleted; }) || matches[0] || null;
+      if (use) {
+        var asset = assetById(g.assetId);
+        if (!rec) {
+          rec = {
+            id: uid(), assetId: g.assetId, assetName: asset ? asset.name : (g.assetName || ''),
+            tripId: t.id, date: t.endDate || todayStr(), count: inc,
+            source: '行程生成', notes: '', updatedAt: now, deleted: false
+          };
+          DB.usage.push(rec);
+        } else {
+          rec.deleted = false;
+          rec.assetName = asset ? asset.name : (g.assetName || rec.assetName || '');
+          rec.date = t.endDate || rec.date || todayStr();
+          rec.count = inc;
+          rec.source = '行程生成';
+          rec.notes = '';
+          rec.updatedAt = now;
+        }
+        matches.forEach(function (u) {
+          if (u !== rec && !u.deleted) { u.deleted = true; u.updatedAt = now; }
+        });
+      } else {
+        matches.forEach(function (u) {
+          if (!u.deleted) { u.deleted = true; u.updatedAt = now; }
+        });
+      }
+    });
+    t.status = '已完成';
+    t.updatedAt = now;
+    saveAll();
+    closeSheet('#trip-confirm-sheet');
+    renderTrips();
+    renderStats();
+    openTrip(t.id);
+    toast('行程已完成，使用记录已生成');
+  }
+
+  /* ---------- 手动补录 / 使用记录 ---------- */
+  function openManualUsage(assetId) {
+    var it = assetById(assetId);
+    if (!it) return;
+    state.usageAssetId = assetId;
+    var f = $('#usage-form');
+    if (!f) return;
+    $('#usage-title').textContent = '补录使用 · ' + it.name;
+    f.elements.date.value = todayStr();
+    f.elements.count.value = 1;
+    f.elements.notes.value = '';
+    openSheet('#usage-sheet');
+  }
+
+  function saveManualUsage(e) {
+    e.preventDefault();
+    var it = assetById(state.usageAssetId);
+    if (!it) return;
+    var f = $('#usage-form');
+    var d = f.elements.date.value;
+    var count = Math.max(1, Math.floor(num(f.elements.count.value)));
+    if (!d) { toast('请选择使用日期'); return; }
+    DB.usage.push({
+      id: uid(), assetId: it.id, assetName: it.name, tripId: null,
+      date: d, count: count, source: '手动补录',
+      notes: String(f.elements.notes.value || '').trim(),
+      updatedAt: Date.now(), deleted: false
+    });
+    saveAll();
+    closeSheet('#usage-sheet');
+    if ($('#detail-sheet').classList.contains('open')) openDetail(it.id);
+    renderTrips();
+    renderStats();
+    toast('已补录使用记录');
+  }
+
+  function deleteUsageRecord(id) {
+    var u = (DB.usage || []).find(function (x) { return x.id === id && !x.deleted; });
+    if (!u) return;
+    if (!window.confirm('撤销这条使用记录？资产累计次数会同步减少。')) return;
+    var now = Date.now();
+    u.deleted = true;
+    u.updatedAt = now;
+    if (u.tripId) {
+      tripGearOf(u.tripId).forEach(function (g) {
+        if (g.assetId === u.assetId) { g.actualUse = false; g.updatedAt = now; }
+      });
+    }
+    saveAll();
+    if ($('#detail-sheet').classList.contains('open')) openDetail(u.assetId);
+    if ($('#trip-sheet').classList.contains('open')) renderTripDetail();
+    if ($('#trip-confirm-sheet').classList.contains('open')) renderTripConfirm();
+    renderTrips();
+    renderStats();
+    toast('已撤销，使用次数已回滚');
+  }
+
+  function renderUsage() {
+    var chips = [
+      { k: 'all', t: '全部' }, { k: '30', t: '近 30 天' }, { k: 'year', t: '今年' }
+    ].map(function (x) {
+      return '<button class="chip ' + (state.usageRange === x.k ? 'on' : '') +
+        '" data-usage-range="' + x.k + '">' + x.t + '</button>';
+    }).join('');
+    var chipsBox = $('#usage-chips');
+    if (chipsBox) chipsBox.innerHTML = chips;
+
+    var q = state.usageQ.trim().toLowerCase();
+    var now = new Date();
+    var year = now.getFullYear();
+    var list = (DB.usage || []).filter(function (u) {
+      if (!u || u.deleted) return false;
+      if (state.usageRange === '30' && diffDays(u.date) > 30) return false;
+      if (state.usageRange === 'year' && parseDate(u.date) && parseDate(u.date).getFullYear() !== year) return false;
+      if (!q) return true;
+      var trip = u.tripId ? (DB.trips || []).find(function (t) { return t.id === u.tripId; }) : null;
+      var hay = [u.assetName, u.notes, trip ? trip.name : ''].join(' ').toLowerCase();
+      return hay.indexOf(q) >= 0;
+    }).sort(function (a, b) {
+      return String(b.date || '').localeCompare(String(a.date || '')) ||
+        (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+
+    var totalCount = list.reduce(function (s, u) { return s + (Number(u.count) || 1); }, 0);
+    var box = $('#usage-list');
+    if (box) {
+      box.innerHTML = list.map(function (u) {
+        var it = assetById(u.assetId);
+        var name = it ? it.name : (u.assetName || '已删除的资产');
+        var trip = u.tripId ? (DB.trips || []).find(function (t) { return t.id === u.tripId; }) : null;
+        var source = u.source || '手动补录';
+        return '<div class="usage-row">' +
+          '<div class="usage-date"><b>' + (u.date ? u.date.slice(5) : '—') + '</b><small>' +
+            (u.date ? u.date.slice(0, 4) : '') + '</small></div>' +
+          '<div class="usage-main"><b>' + esc(name) + '</b>' +
+            '<small>' + esc(source) + (trip ? ' · ' + esc(trip.name) : '') +
+            (u.notes ? ' · ' + esc(u.notes) : '') + '</small></div>' +
+          '<div class="usage-count">×' + (u.count || 1) + '</div>' +
+          (trip ? '<button class="usage-jump" data-usage-jump="' + trip.id + '" title="查看行程">›</button>' : '') +
+        '</div>';
+      }).join('');
+    }
+    var empty = $('#usage-empty');
+    if (empty) {
+      empty.classList.toggle('hidden', list.length > 0);
+      empty.innerHTML = '<div class="empty-ico">🧾</div><p>' +
+        (q || state.usageRange !== 'all' ? '没有匹配的使用记录' : '还没有使用记录') + '</p>' +
+        '<span>' + (q || state.usageRange !== 'all' ? '换个关键词或时间范围' : '完成一次行程，或在资产详情里补录') + '</span>';
+    }
+    var sum = $('#usage-summary');
+    if (sum) sum.textContent = list.length + ' 条记录 · 共 ' + totalCount + ' 次使用';
+  }
+
+  /* ---------- 打包模板 ---------- */
+  function renderTemplates() {
+    var box = $('#tpl-list');
+    if (!box) return;
+    var list = (DB.templates || []).filter(function (t) { return t && !t.deleted; })
+      .sort(function (a, b) {
+        if (!!b.system !== !!a.system) return b.system ? 1 : -1;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      });
+    box.innerHTML = list.map(function (t) {
+      return '<article class="tpl-card" data-tpl="' + t.id + '">' +
+        '<div class="tpl-card-top"><span class="tpl-ico">' + (TRIP_TYPE_ICON[t.tripType] || '📋') + '</span>' +
+          '<div class="tpl-main"><h3>' + esc(t.name) + '</h3>' +
+            '<p>' + esc(t.tripType) + ' · ' + esc(t.season) + ' · ' + (t.items || []).length + ' 项</p></div>' +
+          (t.system ? '<span class="tpl-badge">系统预置</span>' : '<span class="mine-chev">›</span>') +
+        '</div>' +
+        (t.notes ? '<p class="tpl-note">' + esc(t.notes) + '</p>' : '') +
+      '</article>';
+    }).join('');
+    var empty = $('#tpl-empty');
+    if (empty) {
+      empty.classList.toggle('hidden', list.length > 0);
+      empty.innerHTML = '<div class="empty-ico">📋</div><p>还没有打包模板</p>' +
+        '<span>点下面的「新建模板」，把常带的东西存成一套</span>';
+    }
+  }
+
+  function openTemplateView(id) {
+    var t = (DB.templates || []).find(function (x) { return x.id === id && !x.deleted; });
+    if (!t) return;
+    if (!t.system) { openTemplateEditor(t); return; }
+    state.tplViewId = id;
+    $('#tpl-view-title').textContent = t.name;
+    $('#tpl-view-body').innerHTML =
+      '<div class="tpl-view-head"><span class="tpl-ico">' + (TRIP_TYPE_ICON[t.tripType] || '📋') + '</span>' +
+        '<div><b>' + esc(t.name) + '</b><p>' + esc(t.tripType) + ' · ' + esc(t.season) + ' · 系统预置</p></div></div>' +
+      (t.notes ? '<p class="trip-text">' + esc(t.notes) + '</p>' : '') +
+      '<div class="tpl-items-view">' + (t.items || []).map(function (item) {
+        return '<div class="tpl-item-view"><span>' + esc(item.name) + '</span>' +
+          (item.required ? '<em>必选</em>' : '<small>选带</small>') + '</div>';
+      }).join('') + '</div>' +
+      '<p class="form-tip">系统模板不能直接改。复制一份，就能按自己的装备调整。</p>';
+    openSheet('#tpl-view-sheet');
+  }
+
+  function openTemplateEditor(t) {
+    if (t && t.system) { openTemplateView(t.id); return; }
+    state.tplEditingId = t ? t.id : null;
+    state.tplItems = t ? (t.items || []).map(function (x) {
+      return {
+        id: x.id || uid(), assetId: x.assetId || '', gearId: x.gearId || '',
+        name: x.name || '', required: !!x.required, notes: x.notes || ''
+      };
+    }) : [];
+    var f = $('#tpl-form');
+    if (!f) return;
+    var el = f.elements;
+    el.tripType.innerHTML = TRIP_TYPES.map(function (x) { return '<option>' + x + '</option>'; }).join('');
+    el.season.innerHTML = SEASONS.map(function (x) { return '<option>' + x + '</option>'; }).join('');
+    $('#tpl-editor-title').textContent = t ? '编辑模板' : '新建模板';
+    el.name.value = t ? t.name : '';
+    el.tripType.value = t ? t.tripType : TRIP_TYPES[0];
+    el.season.value = t ? t.season : '通用';
+    el.notes.value = t ? (t.notes || '') : '';
+    $('#tpl-danger').classList.toggle('hidden', !t);
+    renderTemplateEditorItems();
+    openSheet('#tpl-editor-sheet');
+  }
+
+  function renderTemplateEditorItems() {
+    var box = $('#tpl-items');
+    if (!box) return;
+    if (!state.tplItems.length) {
+      box.innerHTML = '<div class="trip-empty-inline">还没有物品。从资产选择，或直接输入名称添加。</div>';
+      return;
+    }
+    box.innerHTML = state.tplItems.map(function (item) {
+      var src = item.assetId ? '资产' : (item.gearId ? '装备库' : '文字');
+      return '<div class="tpl-item-row">' +
+        '<div class="tpl-item-main"><b>' + esc(item.name || '未命名') + '</b><small>' + src + '</small></div>' +
+        '<label class="tpl-req"><input type="checkbox" data-tpl-req="' + item.id + '"' +
+          (item.required ? ' checked' : '') + '> 必选</label>' +
+        '<button class="trip-gear-x" data-tpl-item-del="' + item.id + '" title="移除">×</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function addTplTextItem() {
+    var input = $('#tpl-item-input');
+    var name = String(input.value || '').trim();
+    if (!name) { toast('先输入物品名称'); input.focus(); return; }
+    state.tplItems.push({
+      id: uid(), assetId: '', gearId: '', name: name, required: true, notes: ''
+    });
+    input.value = '';
+    renderTemplateEditorItems();
+  }
+
+  function saveTemplateEditor(e) {
+    e.preventDefault();
+    var f = $('#tpl-form');
+    var el = f.elements;
+    var name = String(el.name.value || '').trim();
+    if (!name) { toast('请填写模板名称'); el.name.focus(); return; }
+    if (!state.tplItems.length) { toast('至少添加一件物品'); return; }
+    var existing = state.tplEditingId
+      ? (DB.templates || []).find(function (x) { return x.id === state.tplEditingId; })
+      : null;
+    var now = Date.now();
+    var tpl = existing || { id: uid(), system: false, deleted: false, createdAt: now };
+    tpl.name = name;
+    tpl.tripType = el.tripType.value;
+    tpl.season = el.season.value;
+    tpl.notes = String(el.notes.value || '').trim();
+    tpl.items = state.tplItems.map(function (x) {
+      return {
+        id: x.id || uid(), assetId: x.assetId || '', gearId: x.gearId || '',
+        name: x.name || '', required: !!x.required, notes: x.notes || ''
+      };
+    });
+    tpl.updatedAt = now;
+    if (!existing) DB.templates.push(tpl);
+    saveAll();
+    closeSheet('#tpl-editor-sheet');
+    renderTemplates();
+    renderTrips();
+    toast(existing ? '模板已更新' : '模板已保存');
+  }
+
+  function deleteTemplate(id) {
+    var t = (DB.templates || []).find(function (x) { return x.id === id && !x.deleted; });
+    if (!t || t.system) return;
+    if (!window.confirm('删除模板「' + t.name + '」？')) return;
+    t.deleted = true;
+    t.updatedAt = Date.now();
+    saveAll();
+    closeSheet('#tpl-editor-sheet');
+    renderTemplates();
+    renderTrips();
+    toast('模板已删除');
+  }
+
+  function copySystemTemplate() {
+    var t = (DB.templates || []).find(function (x) { return x.id === state.tplViewId && !x.deleted; });
+    if (!t) return;
+    var now = Date.now();
+    var copy = {
+      id: uid(), name: t.name + '（副本）', tripType: t.tripType, season: t.season,
+      system: false, notes: t.notes || '', createdAt: now, updatedAt: now, deleted: false,
+      items: (t.items || []).map(function (x) {
+        return {
+          id: uid(), assetId: x.assetId || '', gearId: x.gearId || '',
+          name: x.name || '', required: !!x.required, notes: x.notes || ''
+        };
+      })
+    };
+    DB.templates.push(copy);
+    saveAll();
+    closeSheet('#tpl-view-sheet');
+    renderTemplates();
+    openTemplateEditor(copy);
+    toast('已复制，可以改了');
+  }
+
+  /* ---------- 资产选择器 ---------- */
+  function openAssetPicker(mode, tripId) {
+    state.pickerMode = mode;
+    state.pickerTripId = tripId || null;
+    state.pickerSelected = {};
+    state.pickerQ = '';
+    $('#picker-title').textContent = mode === 'trip' ? '添加装备' : '选择资产';
+    $('#picker-q').value = '';
+    renderPicker();
+    openSheet('#picker-sheet');
+  }
+
+  function renderPicker() {
+    var box = $('#picker-list');
+    if (!box) return;
+    var q = state.pickerQ.trim().toLowerCase();
+    var exclude = {};
+    if (state.pickerMode === 'trip' && state.pickerTripId) {
+      tripGearOf(state.pickerTripId).forEach(function (g) { exclude[g.assetId] = true; });
+    }
+    var list = (DB.items || []).filter(function (it) {
+      if (!it || it.deleted || exclude[it.id]) return false;
+      if (!q) return true;
+      return (it.name + ' ' + (it.cat || '') + ' ' + (it.gearCat || '')).toLowerCase().indexOf(q) >= 0;
+    }).sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
+    });
+    box.innerHTML = list.length ? list.map(function (it) {
+      var on = !!state.pickerSelected[it.id];
+      return '<button class="picker-row ' + (on ? 'on' : '') + '" data-picker-pick="' + it.id + '">' +
+        '<span class="picker-ico" style="background:' + iconBg(it.cat) + '">' +
+          iconMarkup(it.iconImg || it.icon) + '</span>' +
+        '<span class="picker-main"><b>' + esc(it.name) + '</b><small>' + esc(it.cat || '') +
+          (assetWeightOf(it) ? ' · ' + fmtWeight(assetWeightOf(it)) : '') + '</small></span>' +
+        '<span class="picker-check">' + (on ? '✓' : '') + '</span>' +
+      '</button>';
+    }).join('') : '<div class="trip-empty-inline">没有可添加的资产</div>';
+    var n = Object.keys(state.pickerSelected).length;
+    var btn = $('#picker-add');
+    if (btn) btn.textContent = (state.pickerMode === 'trip' ? '加入清单' : '加入模板') + (n ? '（' + n + '）' : '');
+  }
+
+  function togglePicker(id) {
+    if (state.pickerSelected[id]) delete state.pickerSelected[id];
+    else state.pickerSelected[id] = true;
+    renderPicker();
+  }
+
+  function addPicked() {
+    var ids = Object.keys(state.pickerSelected);
+    if (!ids.length) { toast('先选几件装备'); return; }
+    var now = Date.now();
+    if (state.pickerMode === 'trip') {
+      var t = tripById(state.pickerTripId);
+      if (!t) return;
+      ids.forEach(function (id) {
+        var it = assetById(id);
+        if (!it || tripGearFor(t.id, id)) return;
+        DB.tripGear.push({
+          id: uid(), tripId: t.id, assetId: it.id, assetName: it.name,
+          source: '手动添加', planned: true, actualCarry: null, actualUse: null,
+          useIncrement: 1, notes: '', updatedAt: now, deleted: false
+        });
+      });
+      t.updatedAt = now;
+      saveAll();
+      closeSheet('#picker-sheet');
+      renderTripDetail();
+      renderTrips();
+      toast('已加入 ' + ids.length + ' 件装备');
+      return;
+    }
+    ids.forEach(function (id) {
+      var it = assetById(id);
+      if (!it) return;
+      if (state.tplItems.some(function (x) { return x.assetId === id; })) return;
+      state.tplItems.push({
+        id: uid(), assetId: it.id, gearId: it.catalogId || '', name: it.name,
+        required: true, notes: ''
+      });
+    });
+    closeSheet('#picker-sheet');
+    renderTemplateEditorItems();
+    toast('已加入模板');
+  }
+
+  /* ---------- 删除行程 ---------- */
+  function deleteTripFlow(id) {
+    var t = tripById(id);
+    if (!t) return;
+    state.tripDeleteId = id;
+    var n = usageForTrip(id).length;
+    if (!n) {
+      if (!window.confirm('删除行程「' + t.name + '」？')) return;
+      softDeleteTrip(id);
+      return;
+    }
+    $('#trip-delete-name').textContent = '「' + t.name + '」已生成 ' + n + ' 条使用记录，删除时怎么处理？';
+    openSheet('#trip-delete-sheet');
+  }
+
+  function softDeleteTrip(id) {
+    var t = tripById(id);
+    if (!t) return;
+    var now = Date.now();
+    t.deleted = true;
+    t.updatedAt = now;
+    tripGearOf(id).forEach(function (g) {
+      g.deleted = true;
+      g.updatedAt = now;
+    });
+    saveAll();
+    closeSheet('#trip-delete-sheet');
+    closeSheet('#trip-sheet');
+    closeSheet('#trip-confirm-sheet');
+    renderTrips();
+    renderStats();
+    toast('行程已删除');
+  }
+
+  function keepUsageAndDeleteTrip(id) {
+    var t = tripById(id);
+    if (!t) return;
+    var now = Date.now();
+    (DB.usage || []).forEach(function (u) {
+      if (!u || u.deleted || u.tripId !== id) return;
+      u.tripId = null;
+      u.source = '手动补录';
+      var extra = (u.notes && u.notes !== ('行程：' + t.name)) ? ' · ' + u.notes : '';
+      u.notes = '原行程：' + t.name + extra;
+      u.updatedAt = now;
+    });
+    softDeleteTrip(id);
+    toast('行程已删除，使用记录已保留');
+  }
+
+  function rollbackAndDeleteTrip(id) {
+    rollbackTripUsage(id);
+    softDeleteTrip(id);
+    toast('行程已删除，使用记录已回滚');
   }
 
   /* =========================================================
@@ -2842,22 +4430,124 @@
     var open = el.closest('[data-open]');
     if (open) { openGear(open.getAttribute('data-open')); return; }
 
-    // 用了一次
-    var use = el.closest('[data-use]');
-    if (use) {
+    // 使用记录：补录 / 撤销 / 跳转行程 / 时间筛选
+    var usageAdd = el.closest('[data-usage-add]');
+    if (usageAdd) {
       ev.stopPropagation();
-      var id = use.getAttribute('data-use');
-      var it = DB.items.find(function (x) { return x.id === id; });
-      if (it) {
-        it.useLog = it.useLog || [];
-        it.useLog.push(todayStr());
-        it.updatedAt = Date.now();
-        saveAll();
-        openDetail(id);
-        toast('已记录一次使用');
-      }
+      openManualUsage(usageAdd.getAttribute('data-usage-add'));
       return;
     }
+    var usageDel = el.closest('[data-usage-del]');
+    if (usageDel) {
+      ev.stopPropagation();
+      deleteUsageRecord(usageDel.getAttribute('data-usage-del'));
+      return;
+    }
+    var usageJump = el.closest('[data-usage-jump]');
+    if (usageJump) {
+      ev.stopPropagation();
+      openTrip(usageJump.getAttribute('data-usage-jump'));
+      return;
+    }
+    var usageRange = el.closest('[data-usage-range]');
+    if (usageRange) {
+      state.usageRange = usageRange.getAttribute('data-usage-range');
+      renderUsage();
+      return;
+    }
+
+    // 行程子页签
+    var tripsub = el.closest('[data-tripsub]');
+    if (tripsub) {
+      state.tripSub = tripsub.getAttribute('data-tripsub');
+      renderTrips();
+      return;
+    }
+    var tripStatus = el.closest('[data-tripstatus]');
+    if (tripStatus) {
+      state.tripStatus = tripStatus.getAttribute('data-tripstatus');
+      renderTripList();
+      return;
+    }
+    if (el.closest('#btn-trip-new')) { openTripEditor(null); return; }
+    if (el.closest('#btn-trip-new-top')) { openTripEditor(null); return; }
+    if (el.closest('#btn-tpl-new')) { openTemplateEditor(null); return; }
+    var tripEdit = el.closest('[data-trip-edit]');
+    if (tripEdit) {
+      openTripEditor(tripById(tripEdit.getAttribute('data-trip-edit')));
+      return;
+    }
+    if (el.closest('#trip-detail-edit')) {
+      openTripEditor(tripById(state.tripId));
+      return;
+    }
+    if (el.closest('[data-trip-add-gear]')) {
+      openAssetPicker('trip', state.tripId);
+      return;
+    }
+    var tripGearDel = el.closest('[data-trip-gear-del]');
+    if (tripGearDel) {
+      removeTripGear(tripGearDel.getAttribute('data-trip-gear-del'));
+      return;
+    }
+    var tripStart = el.closest('[data-trip-start]');
+    if (tripStart) { startTrip(tripStart.getAttribute('data-trip-start')); return; }
+    var tripConfirm = el.closest('[data-trip-confirm]');
+    if (tripConfirm) { openTripConfirm(tripConfirm.getAttribute('data-trip-confirm')); return; }
+    var tripReopen = el.closest('[data-trip-reopen]');
+    if (tripReopen) { reopenTrip(tripReopen.getAttribute('data-trip-reopen')); return; }
+    var tripCancel = el.closest('[data-trip-cancel]');
+    if (tripCancel) { cancelTrip(tripCancel.getAttribute('data-trip-cancel')); return; }
+    var tripDelete = el.closest('[data-trip-delete]');
+    if (tripDelete) { deleteTripFlow(tripDelete.getAttribute('data-trip-delete')); return; }
+    if (el.closest('[data-trip-del-rollback]')) {
+      rollbackAndDeleteTrip(state.tripDeleteId);
+      return;
+    }
+    if (el.closest('[data-trip-del-keep]')) {
+      keepUsageAndDeleteTrip(state.tripDeleteId);
+      return;
+    }
+    var tripCard = el.closest('[data-trip]');
+    if (tripCard) {
+      var tid = tripCard.getAttribute('data-trip');
+      if (tripById(tid)) openTrip(tid);
+      return;
+    }
+    if (el.closest('#btn-trip-confirm')) { confirmTrip(); return; }
+    var cbatch = el.closest('[data-confirm-batch]');
+    if (cbatch) {
+      var bmode = cbatch.getAttribute('data-confirm-batch');
+      $$('#trip-confirm-list [data-confirm-carry]').forEach(function (cb) {
+        if (bmode === 'carry' || bmode === 'all') cb.checked = true;
+        if (bmode === 'clear') cb.checked = false;
+      });
+      $$('#trip-confirm-list [data-confirm-use]').forEach(function (cb) {
+        if (bmode === 'use' || bmode === 'all') cb.checked = true;
+        if (bmode === 'clear') cb.checked = false;
+      });
+      return;
+    }
+
+    // 打包模板
+    var tplCard = el.closest('[data-tpl]');
+    if (tplCard) { openTemplateView(tplCard.getAttribute('data-tpl')); return; }
+    if (el.closest('#tpl-copy')) { copySystemTemplate(); return; }
+    if (el.closest('#tpl-add-asset')) { openAssetPicker('template'); return; }
+    if (el.closest('#tpl-item-add')) { addTplTextItem(); return; }
+    var tplItemDel = el.closest('[data-tpl-item-del]');
+    if (tplItemDel) {
+      var tiid = tplItemDel.getAttribute('data-tpl-item-del');
+      state.tplItems = state.tplItems.filter(function (x) { return x.id !== tiid; });
+      renderTemplateEditorItems();
+      return;
+    }
+    if (el.closest('#tpl-del')) { deleteTemplate(state.tplEditingId); return; }
+
+    // 资产选择器
+    var pick = el.closest('[data-picker-pick]');
+    if (pick) { togglePicker(pick.getAttribute('data-picker-pick')); return; }
+    if (el.closest('#picker-add')) { addPicked(); return; }
 
     // 我的：分类管理
     if (el.closest('#mine-cats')) { openCats(); return; }
@@ -2950,6 +4640,22 @@
             x.deleted = true; x.updatedAt = stamp;
             keepGear.push(x);
           });
+          var keepTrips = [], keepTripGear = [], keepUsage = [];
+          DB.trips.forEach(function (x) {
+            if (x.demo) return;
+            x.deleted = true; x.updatedAt = stamp;
+            keepTrips.push(x);
+          });
+          DB.tripGear.forEach(function (x) {
+            if (x.demo) return;
+            x.deleted = true; x.updatedAt = stamp;
+            keepTripGear.push(x);
+          });
+          DB.usage.forEach(function (x) {
+            if (x.demo) return;
+            x.deleted = true; x.updatedAt = stamp;
+            keepUsage.push(x);
+          });
           // 示例 id 加时间后缀，避免和刚删掉的老记录撞 id 导致删除失效
           var seedSuffix = '_' + stamp.toString(36);
           var freshGear = markDemo(seedGear());
@@ -2966,10 +4672,14 @@
           });
           DB.items = keepItems.concat(freshItems);
           DB.gear = keepGear.concat(freshGear);
+          DB.trips = keepTrips;
+          DB.tripGear = keepTripGear;
+          DB.usage = keepUsage;
           normalizeGearData(DB.gear, DB.items);
+          ensureUsageData();
           resetGearFilters();
           saveAll();
-          renderAssets(); renderGear(); renderStats();
+          renderAssets(); renderGear(); renderTrips(); renderStats();
           toast('已恢复');
         }
       }
@@ -2978,9 +4688,12 @@
           var now = Date.now();
           DB.items.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
           DB.gear.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
+          DB.trips.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
+          DB.tripGear.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
+          DB.usage.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
           resetGearFilters();
           saveAll();
-          renderAssets(); renderGear(); renderStats();
+          renderAssets(); renderGear(); renderTrips(); renderStats();
           toast('已清空');
         }
       }
@@ -3091,6 +4804,7 @@
 
   // 新增
   $('#btn-new').addEventListener('click', function () { openEditor(null, null); });
+  $('#btn-new-top').addEventListener('click', function () { openEditor(null, null); });
   $('#btn-new-fab').addEventListener('click', function () { openEditor(null, null); });
   $('#btn-g-new').addEventListener('click', function () { openGearEditor(null); });
   $('#btn-g-new-top').addEventListener('click', function () { openGearEditor(null); });
@@ -3098,11 +4812,30 @@
   // 装备编辑表单
   $('#geditor-form').addEventListener('submit', saveGearEditor);
   $('#btn-gdel').addEventListener('click', deleteGear);
+  $('#gdelete-unlink').addEventListener('click', function () {
+    var g = DB.gear.find(function (x) { return x.id === state.editingGearId; });
+    if (g) removeGear(g.id);
+  });
 
   // 编辑 / 删除
   $('#btn-edit').addEventListener('click', function () {
     var it = DB.items.find(function (x) { return x.id === state.detailId; });
     if (it) { closeSheet('#detail-sheet'); openEditor(it, null); }
+  });
+
+  $('#btn-to-gear').addEventListener('click', function () {
+    var it = DB.items.find(function (x) { return x.id === state.detailId; });
+    if (!it) return;
+    var linked = it.catalogId
+      ? DB.gear.find(function (g) { return g.id === it.catalogId && !g.deleted; })
+      : null;
+    if (linked) {
+      closeSheet('#detail-sheet');
+      switchTab('gear');
+      openGear(linked.id);
+    } else {
+      addItemToGear(it);
+    }
   });
 
   $('#btn-del').addEventListener('click', function () {
@@ -3112,20 +4845,32 @@
       ? DB.gear.find(function (g) { return g.id === it.catalogId && !g.deleted; })
       : null;
     var msg = linkedGear
-      ? '删除「' + it.name + '」？\n装备库里的对应资料卡也会一起删除。\n只想移出资产、保留资料卡，请点「移出资产」。'
+      ? '删除并解绑「' + it.name + '」？\n装备库里的资料卡会保留。'
       : '删除「' + it.name + '」？';
     if (!confirm(msg)) return;
-    var now = Date.now();
     it.deleted = true;
     it.catalogId = null;
-    it.updatedAt = now;
-    if (linkedGear) { linkedGear.deleted = true; linkedGear.updatedAt = now; }
+    it.updatedAt = Date.now();
     saveAll(); closeSheet('#detail-sheet'); renderAssets(); renderGear();
-    toast(linkedGear ? '已删除，装备库资料卡也一并移除' : '已删除');
+    toast(linkedGear ? '已删除并解绑，装备库资料卡保留' : '已删除');
   });
 
   // 表单
   $('#editor-form').addEventListener('submit', saveEditor);
+  $('#trip-form').addEventListener('submit', saveTripEditor);
+  $('#usage-form').addEventListener('submit', saveManualUsage);
+  $('#tpl-form').addEventListener('submit', saveTemplateEditor);
+  $('#trip-type').addEventListener('change', function () {
+    renderTripTemplateHint(!state.tripEditingId);
+  });
+  $('#usage-q').addEventListener('input', function (e) {
+    state.usageQ = e.target.value;
+    renderUsage();
+  });
+  $('#picker-q').addEventListener('input', function (e) {
+    state.pickerQ = e.target.value;
+    renderPicker();
+  });
 
   // 搜索
   $('#q').addEventListener('input', function (e) {
@@ -3148,6 +4893,26 @@
   /* 我的：下拉与输入 */
   document.addEventListener('change', function (ev) {
     var el = ev.target;
+    if (el.hasAttribute && el.hasAttribute('data-confirm-use')) {
+      if (el.checked) {
+        var useId = el.getAttribute('data-confirm-use');
+        var carryBox = document.querySelector('[data-confirm-carry="' + useId + '"]');
+        if (carryBox) carryBox.checked = true;
+      }
+      return;
+    }
+    if (el.hasAttribute && el.hasAttribute('data-confirm-carry') && !el.checked) {
+      var carryId = el.getAttribute('data-confirm-carry');
+      var useBox = document.querySelector('[data-confirm-use="' + carryId + '"]');
+      if (useBox) useBox.checked = false;
+      return;
+    }
+    if (el.hasAttribute && el.hasAttribute('data-tpl-req')) {
+      var rid = el.getAttribute('data-tpl-req');
+      var item = state.tplItems.find(function (x) { return x.id === rid; });
+      if (item) item.required = !!el.checked;
+      return;
+    }
     if (el.id === 'mine-cur') { setCur(el.value); return; }
     if (el.id === 'mine-theme') { setTheme(el.value); return; }
     if (el.id === 'poster-bg-file') {
@@ -3183,6 +4948,9 @@
   $('#editor-cat').innerHTML = CATS.map(function (c) {
     return '<option>' + esc(c) + '</option>';
   }).join('');
+  $('#editor-cat').addEventListener('change', function () {
+    syncGearCatRow(this.value, true);
+  });
 
   $('#geditor-cat').innerHTML = GEAR_CATS.map(function (c) {
     return '<option>' + c + '</option>';
@@ -3255,19 +5023,26 @@
   }
 
   /* 横滑筛选条：滚到头时取消右缘渐隐 */
-  ['#cat-chips', '#gear-chips'].forEach(function (sel) {
+  ['#cat-chips', '#gear-chips', '#trip-chips', '#usage-chips'].forEach(function (sel) {
     var box = $(sel);
     if (!box) return;
     box.addEventListener('scroll', function () { updateChipsEdge(box); });
     bindChipsDrag(box);
   });
+  /* 分享弹层里的横排选项：鼠标也能拖动/滚轮横滑 */
+  ['#poster-styles', '#poster-plans'].forEach(function (sel) {
+    bindChipsDrag($(sel));
+  });
   window.addEventListener('resize', function () {
     updateChipsEdge($('#cat-chips'));
     updateChipsEdge($('#gear-chips'));
+    updateChipsEdge($('#trip-chips'));
+    updateChipsEdge($('#usage-chips'));
   });
 
   renderAssets();
   renderGear();
+  renderTrips();
   renderStats();
   setupCloud();
 
@@ -3275,9 +5050,10 @@
   try {
     var qs = new URLSearchParams(location.search);
     var t = qs.get('tab');
-    if (t === 'gear' || t === 'stats' || t === 'assets') switchTab(t);
+    if (t === 'gear' || t === 'stats' || t === 'assets' || t === 'trips') switchTab(t);
     if (qs.get('detail')) { switchTab('assets'); openDetail(qs.get('detail')); }
     if (qs.get('gear')) { switchTab('gear'); openGear(qs.get('gear')); }
+    if (qs.get('trip')) { switchTab('trips'); openTrip(qs.get('trip')); }
     if (qs.get('edit')) { switchTab('assets'); openEditor(null, null); }
     if (qs.get('connect')) { openSheet('#login-sheet'); }
   } catch (err) { /* 忽略 */ }
