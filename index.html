@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>装备台账 · 山野手账</title>
-<link rel="stylesheet" href="styles.css?v=34">
+<link rel="stylesheet" href="styles.css?v=35">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -23,7 +23,11 @@
       <h1>我的资产</h1>
       <p class="sub">记录每件物品的日均成本和使用次数。</p>
       <div class="pagehead-actions">
-        <span class="sync-dot" id="sync-dot" title="同步状态"></span>
+        <button class="sync-btn" id="btn-sync" type="button" title="刷新同步" aria-label="刷新同步">
+          <span class="sync-dot" id="sync-dot"></span>
+          <span class="sync-text" id="sync-text">同步</span>
+          <span class="sync-refresh" aria-hidden="true">↻</span>
+        </button>
         <button class="head-add" id="btn-new-top" title="新增物品"><span class="ha-plus">+</span><span class="ha-label">新增</span></button>
         <button class="icon-btn" id="btn-more" title="更多">⚙</button>
       </div>
@@ -807,7 +811,7 @@
 <script src="cloud.js?v=25"></script>
 <script src="icons.js?v=24"></script>
 <script src="icons3d.js?v=24"></script>
-<script src="app.js?v=39"></script>
+<script src="app.js?v=42"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {

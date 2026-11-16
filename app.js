@@ -2873,6 +2873,14 @@
       if (manual) toast('未配置云端');
       return;
     }
+    if (!cloudConnected) {
+      if (manual) toast('还没连接云同步，点右上角 ⚙ 连接');
+      return;
+    }
+    if (Cloud.status() === 'syncing') {
+      if (manual) toast('正在同步，完成后会显示「已同步」');
+      return;
+    }
     if (manual) toast('正在同步…');
     Cloud.sync(DB).then(function (merged) {
       if (!merged) {
@@ -2900,21 +2908,46 @@
   }
 
   function setupCloud() {
-    if (!window.Cloud || !Cloud.enabled()) return;
+    var syncBtn = $('#btn-sync');
+    var syncText = $('#sync-text');
+    if (!window.Cloud || !Cloud.enabled()) {
+      if (syncBtn) syncBtn.classList.add('hidden');
+      return;
+    }
     var dot = $('#sync-dot');
     var tokenMode = Cloud.isTokenMode();
 
     Cloud.onStatus(function (s) {
       var cls = 'sync-dot';
-      if (s === 'ok') cls += ' ok';
-      else if (s === 'syncing') cls += ' syncing';
-      else if (s === 'error') cls += ' error';
-      if (s === 'ok') setLastSync();
+      var label = '待同步';
+      var title = '待同步';
+      if (s === 'ok') {
+        cls += ' ok';
+        label = '已同步';
+        title = '已同步 · ' + fmtSyncTime(getLastSync());
+        setLastSync();
+      } else if (s === 'syncing') {
+        cls += ' syncing';
+        label = '同步中';
+        title = '正在同步…';
+      } else if (s === 'error') {
+        cls += ' error';
+        label = '同步失败';
+        title = '同步失败：' + Cloud.lastError();
+      } else {
+        label = cloudConnected ? '待同步' : '未连接';
+        title = cloudConnected ? '待同步' : '未连接云同步';
+      }
       dot.className = cls;
-      dot.title = s === 'error'
-        ? '同步失败：' + Cloud.lastError()
-        : s === 'ok' ? '已同步 · ' + fmtSyncTime(getLastSync())
-        : s === 'syncing' ? '同步中' : '待同步';
+      dot.title = title;
+      if (syncText) {
+        syncText.textContent = label;
+        syncText.classList.toggle('error', s === 'error');
+      }
+      if (syncBtn) {
+        syncBtn.title = title;
+        syncBtn.classList.toggle('syncing', s === 'syncing');
+      }
     });
 
     // Gist 模式：把登录框改造成 Token 输入框
@@ -3167,8 +3200,6 @@
           '<button class="btn-main ghost" data-menu="backup">导出备份（JSON）</button>' +
           '<button class="btn-main ghost" data-menu="restore">导入备份（JSON）</button>' +
           '<button class="btn-main ghost" data-menu="import">导入 CSV</button>' +
-          '<button class="btn-main ghost" data-menu="reset">恢复示例数据</button>' +
-          '<button class="btn-main ghost" data-menu="clear" style="color:#f04438;border-color:#ffe3e1">清空全部记录</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(el);
@@ -4624,84 +4655,11 @@
         fb.onchange = function () { if (fb.files[0]) importBackup(fb.files[0]); };
         fb.click();
       }
-      if (act === 'reset') {
-        if (confirm('恢复示例数据会清空当前全部记录，确定吗？')) {
-          var stamp = Date.now();
-          // 旧的真实记录保留删除标记，云端才会一起清掉；旧示例直接丢掉
-          var keepItems = [];
-          DB.items.forEach(function (x) {
-            if (x.demo) return;
-            x.deleted = true; x.updatedAt = stamp;
-            keepItems.push(x);
-          });
-          var keepGear = [];
-          DB.gear.forEach(function (x) {
-            if (x.demo) return;
-            x.deleted = true; x.updatedAt = stamp;
-            keepGear.push(x);
-          });
-          var keepTrips = [], keepTripGear = [], keepUsage = [];
-          DB.trips.forEach(function (x) {
-            if (x.demo) return;
-            x.deleted = true; x.updatedAt = stamp;
-            keepTrips.push(x);
-          });
-          DB.tripGear.forEach(function (x) {
-            if (x.demo) return;
-            x.deleted = true; x.updatedAt = stamp;
-            keepTripGear.push(x);
-          });
-          DB.usage.forEach(function (x) {
-            if (x.demo) return;
-            x.deleted = true; x.updatedAt = stamp;
-            keepUsage.push(x);
-          });
-          // 示例 id 加时间后缀，避免和刚删掉的老记录撞 id 导致删除失效
-          var seedSuffix = '_' + stamp.toString(36);
-          var freshGear = markDemo(seedGear());
-          var gearIdMap = {};
-          freshGear.forEach(function (g) {
-            var oldId = g.id;
-            g.id = oldId + seedSuffix;
-            gearIdMap[oldId] = g.id;
-          });
-          var freshItems = markDemo(seedItems());
-          freshItems.forEach(function (it) {
-            it.id = it.id + seedSuffix;
-            if (it.catalogId && gearIdMap[it.catalogId]) it.catalogId = gearIdMap[it.catalogId];
-          });
-          DB.items = keepItems.concat(freshItems);
-          DB.gear = keepGear.concat(freshGear);
-          DB.trips = keepTrips;
-          DB.tripGear = keepTripGear;
-          DB.usage = keepUsage;
-          normalizeGearData(DB.gear, DB.items);
-          ensureUsageData();
-          resetGearFilters();
-          saveAll();
-          renderAssets(); renderGear(); renderTrips(); renderStats();
-          toast('已恢复');
-        }
-      }
-      if (act === 'clear') {
-        if (confirm('清空全部记录？会同时清空云端，不可撤销。建议先导出 CSV。')) {
-          var now = Date.now();
-          DB.items.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
-          DB.gear.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
-          DB.trips.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
-          DB.tripGear.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
-          DB.usage.forEach(function (x) { x.deleted = true; x.updatedAt = now; });
-          resetGearFilters();
-          saveAll();
-          renderAssets(); renderGear(); renderTrips(); renderStats();
-          toast('已清空');
-        }
-      }
       if (act === 'connect') { openSheet('#login-sheet'); }
       if (act === 'sync') { doSync(true); }
       if (act === 'logout') {
+        cloudConnected = false;
         Cloud.logout().then(function () {
-          cloudConnected = false;
           openSheet('#login-sheet');
           $('#login-err').textContent = '';
         });
@@ -4786,7 +4744,9 @@
     }
   });
 
-  // 顶部齿轮
+  // 顶部同步刷新 / 齿轮
+  var btnSync = $('#btn-sync');
+  if (btnSync) btnSync.addEventListener('click', function () { doSync(true); });
   $('#btn-more').addEventListener('click', openMenu);
 
   // 资产筛选

@@ -800,6 +800,20 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .sync-dot.syncing{background:#f5a524;animation:dppulse 1s infinite}
 .sync-dot.error{background:#f04438}
 @keyframes dppulse{0%,100%{opacity:1}50%{opacity:.25}}
+/* 首页同步按钮：点一下立即刷新，文字和圆点一起显示结果 */
+.sync-btn{
+  display:inline-flex;align-items:center;gap:5px;height:30px;flex:none;
+  padding:0 9px;border-radius:999px;background:var(--card);
+  border:1px solid var(--line);color:var(--sub);
+  font-size:11px;font-weight:600;white-space:nowrap;
+}
+.sync-btn:active{transform:scale(.97)}
+.sync-btn .sync-dot{margin-right:0}
+.sync-btn .sync-refresh{font-size:14px;line-height:1;color:var(--muted);transition:transform .2s}
+.sync-btn.syncing .sync-refresh{animation:syncspin .9s linear infinite}
+.sync-text.error{color:var(--red)}
+@keyframes syncspin{to{transform:rotate(360deg)}}
+[data-theme="dark"] .sync-btn{background:var(--card2);border-color:var(--line)}
 
 /* ================= 登录 ================= */
 .sheet-auto{

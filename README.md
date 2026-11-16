@@ -14,6 +14,9 @@
 
 > 没连 Token 也能正常用，只是数据只在本机。连上之后会自动把本地数据合并上去。
 
+首页右上角有一个同步按钮：点一下立即刷新，按钮上会直接显示「同步中 / 已同步 / 同步失败 / 未连接」，
+不用再猜这次有没有同步成功。
+
 ## 怎么打开
 
 **方式一（推荐）**：双击本机的 `工具\启动.bat`
@@ -85,7 +88,7 @@
 - ☁️ 多端同步（需接后端，如 Supabase）
 - 📱 PWA 化，添加到主屏幕
 
-> 装备库里的内容是示例数据，可在 ⚙ 里清空后录入自己的，或直接改 `app.js` 里的 `seedGear()`。
+> 装备库里的内容是示例数据，可以逐条删除后再录入自己的，或直接改 `app.js` 里的 `seedGear()`。
 >
 > 图标：Microsoft Fluent Emoji（彩色 3D，https://github.com/microsoft/fluentui-emoji，MIT License）
 > 与 Tabler Icons（线框，https://github.com/tabler/tabler-icons，MIT License）。
