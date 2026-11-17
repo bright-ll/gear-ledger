@@ -3163,6 +3163,19 @@
       DB.tripGear = mergeById(DB.tripGear, tripGear);
       DB.usage = mergeById(DB.usage, usage);
       DB.templates = mergeById(DB.templates, templates);
+
+      /* 导入的数据可能带着台账还没有的分类（例如从别的系统搬过来的「衣服」「汽车」），
+         自动补进分类列表，否则点「新增」时下拉框里选不到这些分类 */
+      var catAdded = 0;
+      items.forEach(function (x) {
+        var c = String(x.cat || '').trim();
+        if (c && CATS.indexOf(c) < 0 && c !== '全部分类') {
+          CATS.push(c);
+          catAdded++;
+        }
+      });
+      if (catAdded) saveCats();
+
       normalizeGearData(DB.gear, DB.items);
       ensureUsageData();
       saveAll();
