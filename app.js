@@ -3122,6 +3122,16 @@
     toast('已导出备份');
   }
 
+  /* 导入去重用的指纹：名称去掉所有空格、英文转小写，再加实付总额。
+     这样「Uto速干衣」和「Uto 速干衣」会被认成同一件，
+     而「探拓冲锋裤 ¥118」和「探拓冲锋裤 ¥69」总额不同，仍然是两条 */
+  function importDedupeKey(x) {
+    if (!x) return '';
+    var name = String(x.name == null ? '' : x.name).replace(/[\s\u3000]+/g, '').toLowerCase();
+    var total = Math.round((Number(x.price) || 0) * (Number(x.qty) || 1) + (Number(x.extra) || 0));
+    return name + '|' + total;
+  }
+
   function importBackup(file) {
     var reader = new FileReader();
     reader.onload = function () {
@@ -3157,6 +3167,26 @@
       usage.forEach(function (x) { if (!x.id) x.id = uid(); });
       templates.forEach(function (x) { if (!x.id) x.id = uid(); });
 
+      /* 同一件东西已经在你台账里了，就不再重复加一条：
+         备份是按 id 合并的，而外部系统导出的数据 id 全是新的，同一件物品会变成两条。
+         用「名称 + 实付总额」判断（总额 = 价格×数量+附加），避免单价×数量的拆法不同导致漏判；
+         id 已存在的老记录不参与判断，保证正常「恢复备份」还能更新原记录 */
+      var localIds = {};
+      var existingKeys = {};
+      DB.items.forEach(function (x) {
+        if (!x) return;
+        if (x.id) localIds[x.id] = true;
+        if (x.deleted || x.demo) return;
+        existingKeys[importDedupeKey(x)] = true;
+      });
+      var dupSkipped = 0;
+      items = items.filter(function (x) {
+        var key = importDedupeKey(x);
+        if (!localIds[x.id] && existingKeys[key]) { dupSkipped++; return false; }
+        existingKeys[key] = true;
+        return true;
+      });
+
       DB.items = mergeById(DB.items, items);
       DB.gear = mergeById(DB.gear, gear);
       DB.trips = mergeById(DB.trips, trips);
@@ -3176,11 +3206,21 @@
       });
       if (catAdded) saveCats();
 
+      /* 导入的是你自己的真实数据时，顺手把本机残留的示例数据清掉，
+         避免示例物品和示例使用记录混进真实账目（示例数据本来就不上云，删掉没有损失） */
+      if (items.some(function (x) { return x && !x.demo; })) {
+        DB.items = DB.items.filter(function (x) { return !x.demo; });
+        DB.gear = DB.gear.filter(function (x) { return !x.demo; });
+        DB.usage = (DB.usage || []).filter(function (x) { return !x.demo; });
+      }
+
       normalizeGearData(DB.gear, DB.items);
       ensureUsageData();
       saveAll();
       renderAssets(); renderGear(); renderTrips(); renderStats();
-      toast('已导入备份：物品 ' + items.length + ' 条，装备 ' + gear.length + ' 件，行程 ' + trips.length + ' 条');
+      toast('已导入备份：物品 ' + items.length + ' 条' +
+        (dupSkipped ? '，跳过重复 ' + dupSkipped + ' 条' : '') +
+        '，装备 ' + gear.length + ' 件，行程 ' + trips.length + ' 条');
     };
     reader.readAsText(file);
   }
@@ -3924,6 +3964,11 @@
     toast('已撤销，使用次数已回滚');
   }
 
+  /* 台账里已经有你自己的真实记录了吗？有的话示例数据就该退场 */
+  function hasRealData() {
+    return (DB.items || []).some(function (x) { return x && !x.demo && !x.deleted; });
+  }
+
   function renderUsage() {
     var chips = [
       { k: 'all', t: '全部' }, { k: '30', t: '近 30 天' }, { k: 'year', t: '今年' }
@@ -3937,8 +3982,11 @@
     var q = state.usageQ.trim().toLowerCase();
     var now = new Date();
     var year = now.getFullYear();
+    var realMode = hasRealData();
     var list = (DB.usage || []).filter(function (u) {
       if (!u || u.deleted) return false;
+      /* 有真实物品时，示例数据带出来的使用记录不再展示（它们不上云，也不属于你的账目） */
+      if (realMode && (u.demo || (assetById(u.assetId) || {}).demo)) return false;
       if (state.usageRange === '30' && diffDays(u.date) > 30) return false;
       if (state.usageRange === 'year' && parseDate(u.date) && parseDate(u.date).getFullYear() !== year) return false;
       if (!q) return true;
