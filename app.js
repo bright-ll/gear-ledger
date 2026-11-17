@@ -2249,6 +2249,7 @@
           '<select class="mine-select" id="mine-theme">' + thOpts + '</select></div>' +
         mineRow('↩️', '恢复备份', '从 JSON 备份合并回来', 'data-mine="restore"') +
         mineRow('📥', '导入 CSV', '从表格文件补充记录', 'data-mine="importCsv"') +
+        mineRow('🧹', '清理重复与示例', '同名同价的多余副本、示例数据', 'data-mine="dedupe"') +
       '</div>' +
       '<div class="mine-title">分享</div>' +
       '<div class="mine-card">' +
@@ -3130,6 +3131,52 @@
     var name = String(x.name == null ? '' : x.name).replace(/[\s\u3000]+/g, '').toLowerCase();
     var total = Math.round((Number(x.price) || 0) * (Number(x.qty) || 1) + (Number(x.extra) || 0));
     return name + '|' + total;
+  }
+
+  /* 清理重复物品：同名同价的多余副本「软删除」（会同步到其他设备，避免复活），
+     每组保留记录最完整的一条（使用记录 > 备注 > 累计次数，仍打平则保留更早那条）。
+     有真实数据时，顺手把示例数据也清掉。用于误导入 / 重复导入后的补救 */
+  function cleanDuplicates() {
+    var groups = {};
+    (DB.items || []).forEach(function (x) {
+      /* 示例数据不参与「重复」判定：它下面会整组清掉，
+         若和真实记录同名同价混在一起判重，会出现「真记录被当副本删掉」 */
+      if (!x || x.deleted || x.demo) return;
+      var k = importDedupeKey(x);
+      (groups[k] = groups[k] || []).push(x);
+    });
+    var dupGroups = Object.keys(groups).filter(function (k) { return groups[k].length > 1; });
+    var dupCount = dupGroups.reduce(function (s, k) { return s + groups[k].length - 1; }, 0);
+    var demoCount = hasRealData()
+      ? (DB.items || []).filter(function (x) { return x && x.demo && !x.deleted; }).length
+      : 0;
+
+    if (!dupCount && !demoCount) { toast('没有发现重复物品或示例数据'); return; }
+
+    var parts = [];
+    if (dupCount) parts.push(dupCount + ' 条重复物品（保留记录最完整的一条）');
+    if (demoCount) parts.push(demoCount + ' 条示例数据');
+    if (!confirm('将清理 ' + parts.join(' 和 ') + '，清掉的物品会移入回收站。继续吗？')) return;
+
+    var now = Date.now(), removed = 0;
+    dupGroups.forEach(function (k) {
+      var list = groups[k].slice().sort(function (a, b) {
+        var sa = (a.useLog || []).length + (a.notes ? 1 : 0) + ((Number(a.baseCount) || 0) > 0 ? 1 : 0);
+        var sb = (b.useLog || []).length + (b.notes ? 1 : 0) + ((Number(b.baseCount) || 0) > 0 ? 1 : 0);
+        if (sa !== sb) return sb - sa;
+        return (a.updatedAt || 0) - (b.updatedAt || 0);
+      });
+      list.slice(1).forEach(function (x) { x.deleted = true; x.updatedAt = now; removed++; });
+    });
+    if (demoCount) {
+      DB.items = DB.items.filter(function (x) { return !x.demo; });
+      DB.gear = (DB.gear || []).filter(function (x) { return !x.demo; });
+      DB.usage = (DB.usage || []).filter(function (x) { return !x.demo; });
+    }
+
+    saveAll();
+    renderAssets(); renderGear(); renderTrips(); renderStats();
+    toast('已清理：重复 ' + removed + ' 条' + (demoCount ? '，示例 ' + demoCount + ' 条' : ''));
   }
 
   function importBackup(file) {
@@ -4657,6 +4704,7 @@
       if (mact === 'backup') exportBackup();
       if (mact === 'restore') pickFile('.json,application/json', importBackup);
       if (mact === 'importCsv') pickFile('.csv,text/csv', importCSV);
+      if (mact === 'dedupe') cleanDuplicates();
       if (mact === 'poster') openPoster();
       return;
     }
