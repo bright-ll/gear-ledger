@@ -690,20 +690,30 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 .st-hero-grid span{display:block;font-size:9.5px;opacity:.72;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* 分类环形图 */
-.st-donut-row{display:flex;align-items:center;gap:4px;margin-top:2px}
-.st-donut-wrap{position:relative;width:126px;height:126px;flex:none}
-.st-donut{width:126px;height:126px;transform:rotate(-90deg)}
+.st-donut-row{display:flex;align-items:center;gap:12px;margin-top:6px}
+.st-donut-wrap{position:relative;width:108px;height:108px;flex:none}
+.st-donut{width:108px;height:108px;transform:rotate(-90deg)}
 .st-donut circle{fill:none;stroke-width:17}
 .st-ring{stroke:var(--card2)}
 .st-seg{stroke:var(--cc)}
-.st-dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 20px}
-.st-dc b{font-size:23px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.st-dc span{font-size:10px;color:var(--muted);margin-top:1px;max-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.st-legend{flex:1;min-width:0;display:flex;flex-direction:column;gap:11px;margin:0;padding:0 0 0 2px;list-style:none}
-.st-legend li{display:flex;align-items:center;gap:8px;min-width:0}
+.st-dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 16px}
+.st-dc b{font-size:21px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.st-dc span{font-size:10px;color:var(--muted);margin-top:1px;max-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 图例改成多列网格：分类多的时候不再拉成一长条 */
+.st-legend{flex:1;min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin:0;padding:0;list-style:none}
+.st-legend li{display:flex;align-items:center;gap:7px;min-width:0}
 .st-legend i{width:8px;height:8px;border-radius:3px;flex:none;background:var(--cc)}
-.st-legend b{display:block;font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.st-legend span{display:block;font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-legend b{display:block;font-size:12px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-legend span{display:block;font-size:10px;line-height:1.3;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+@media(min-width:520px){
+  .st-donut-wrap{width:120px;height:120px}
+  .st-donut{width:120px;height:120px}
+  /* 卡片变宽就自动加列，避免行被拉得太长 */
+  .st-legend{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px 18px}
+  .st-legend b{font-size:12.5px}
+  .st-legend span{font-size:10.5px}
+}
 
 /* 分类明细卡 */
 .st-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
@@ -1190,27 +1200,27 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 }
 
 /* ---------- 页头 ---------- */
-[data-theme] .pagehead{padding:calc(24px + var(--safe-t)) 20px 0}
+[data-theme] .pagehead{padding:calc(12px + var(--safe-t)) 16px 0}
 [data-theme] .kicker{
   display:flex;align-items:center;gap:9px;
   color:var(--blue);font-weight:800;letter-spacing:.18em;
 }
 [data-theme] .kicker::after{content:"";height:1px;width:38px;background:currentColor;opacity:.45}
 [data-theme] .pagehead h1{
-  font-family:var(--serif);font-size:31px;font-weight:700;
-  letter-spacing:.01em;margin:7px 0 5px;
+  font-family:var(--serif);font-size:23px;font-weight:700;
+  letter-spacing:.01em;margin:3px 0 2px;
 }
 [data-theme] .pagehead .sub{color:var(--sub);font-size:12.5px}
 
 /* ---------- 汇总票根 ---------- */
 [data-theme] .hero{
-  margin:14px 16px 0;padding:16px 18px;border-radius:12px;
+  margin:8px 14px 0;padding:11px 14px 12px;border-radius:12px;
   background:var(--card);color:var(--text);
   border:1.5px solid #2b251c;
   box-shadow:6px 6px 0 rgba(43,37,28,.10);
 }
 [data-theme] .hero-blob{display:none}
-[data-theme] .hero-top{margin-bottom:14px}
+[data-theme] .hero-top{margin-bottom:8px}
 [data-theme] .hero-title{
   display:inline-flex;align-items:center;gap:7px;
   font-size:13px;font-weight:800;letter-spacing:.06em;
@@ -1225,15 +1235,17 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   border-radius:7px;box-shadow:none;
 }
 [data-theme] .hero .vsw.on{background:var(--blue);border-color:var(--blue);color:#fff}
-[data-theme] .hero-stats{grid-template-columns:1.25fr 1fr .8fr;gap:0}
+[data-theme] .hero-stats{grid-template-columns:1.2fr 1fr .8fr;gap:0}
 [data-theme] .hs{padding-right:12px}
 [data-theme] .hs + .hs{border-left:1px dashed #cdbda1;padding-left:14px}
 [data-theme] .hs-v{
-  font-family:var(--serif);font-size:26px;font-weight:700;
+  font-family:var(--serif);font-size:20px;font-weight:700;
   letter-spacing:-.01em;line-height:1.2;color:var(--text);
 }
 [data-theme] .hs:first-child .hs-v{color:var(--blue)}
-[data-theme] .hs-k{font-size:9.5px;letter-spacing:.05em;color:#93856e;margin-top:6px;white-space:nowrap}
+[data-theme] .hs-k{font-size:9.5px;letter-spacing:.05em;color:#93856e;margin-top:4px;white-space:nowrap;margin-right:-.05em}
+/* 最后一列（数量）右对齐：数字与「数量(个)」共用卡片右边线，不再看起来偏移 */
+[data-theme] .hs:last-child{padding-right:0;text-align:right}
 
 /* ---------- 分类 chips ---------- */
 [data-theme] .asset-tools .chip,
@@ -1374,23 +1386,23 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 @media(min-width:1080px){
   /* ---------- 资产页 ---------- */
   [data-theme] #view-assets{display:block}
-  [data-theme] #view-assets > .pagehead{padding-left:0;padding-right:0}
+  [data-theme] #view-assets > .pagehead{padding-left:0;padding-right:0;padding-top:0}
   [data-theme] #view-assets > .hero{
     position:relative;top:auto;align-self:auto;
-    margin:18px 0 0;padding:20px 28px 22px;display:block;
+    margin:8px 0 0;padding:11px 22px 12px;display:block;
   }
-  [data-theme] #view-assets > .hero .hero-top{margin-bottom:16px}
+  [data-theme] #view-assets > .hero .hero-top{margin-bottom:8px}
   [data-theme] #view-assets > .hero .hero-title{font-size:14.5px}
   [data-theme] #view-assets > .hero .hero-stats{
-    grid-template-columns:1.3fr 1fr .55fr;gap:0;align-items:end;
+    grid-template-columns:1.3fr 1fr 1fr;gap:0;align-items:start;
   }
-  [data-theme] #view-assets > .hero .hs{padding:0 30px}
+  [data-theme] #view-assets > .hero .hs{padding:0 24px}
   [data-theme] #view-assets > .hero .hs:first-child{padding-left:0}
-  [data-theme] #view-assets > .hero .hs + .hs{border-left:1px dashed #cdbda1;padding-left:30px}
+  [data-theme] #view-assets > .hero .hs + .hs{border-left:1px dashed #cdbda1;padding-left:24px}
   [data-theme] #view-assets > .hero .hs:last-child{padding-right:0;text-align:right}
-  [data-theme] #view-assets > .hero .hs-v{font-size:38px}
-  [data-theme] #view-assets > .hero .hs-k{font-size:10px;letter-spacing:.14em;margin-top:8px}
-  [data-theme] #view-assets > .asset-tools{padding:20px 0 0}
+  [data-theme] #view-assets > .hero .hs-v{font-size:26px}
+  [data-theme] #view-assets > .hero .hs-k{font-size:10px;letter-spacing:.12em;margin-top:4px;margin-right:-.12em}
+  [data-theme] #view-assets > .asset-tools{padding:12px 0 0}
   [data-theme] #view-assets .scroll-body{display:contents}
   [data-theme] #view-assets .asset-box{grid-area:auto;padding:6px 0 0}
   [data-theme] #view-assets .asset-box.view-list{
