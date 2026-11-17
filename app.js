@@ -3160,15 +3160,29 @@
     });
     var dupGroups = Object.keys(groups).filter(function (k) { return groups[k].length > 1; });
     var dupCount = dupGroups.reduce(function (s, k) { return s + groups[k].length - 1; }, 0);
-    var demoCount = hasRealData()
+    var hasReal = hasRealData();
+    var demoCount = hasReal
       ? (DB.items || []).filter(function (x) { return x && x.demo && !x.deleted; }).length
       : 0;
 
-    if (!dupCount && !demoCount) { toast('没有发现重复物品或示例数据'); return; }
+    /* 失效使用记录：关联资产已经不在了（示例物品清掉后留下的老记录），
+       它们的 demo 标记可能是老版本留下的 false，只能靠「找不到资产」来识别 */
+    var liveIds = {};
+    (DB.items || []).forEach(function (x) { if (x && !x.deleted) liveIds[x.id] = true; });
+    var orphanUsage = [];
+    if (hasReal) {
+      (DB.usage || []).forEach(function (u) {
+        if (!u || u.deleted || u.demo) return;
+        if (u.assetId && !liveIds[u.assetId]) orphanUsage.push(u);
+      });
+    }
+
+    if (!dupCount && !demoCount && !orphanUsage.length) { toast('没有发现重复物品、示例数据或失效记录'); return; }
 
     var parts = [];
     if (dupCount) parts.push(dupCount + ' 条重复物品（保留记录最完整的一条）');
     if (demoCount) parts.push(demoCount + ' 条示例数据');
+    if (orphanUsage.length) parts.push(orphanUsage.length + ' 条失效使用记录');
     if (!confirm('将清理 ' + parts.join(' 和 ') + '，清掉的物品会移入回收站。继续吗？')) return;
 
     var now = Date.now(), removed = 0;
@@ -3181,6 +3195,8 @@
       });
       list.slice(1).forEach(function (x) { x.deleted = true; x.updatedAt = now; removed++; });
     });
+    /* 失效记录用「软删除」：它们会同步到云端，直接抹掉会被下次同步拉回来 */
+    orphanUsage.forEach(function (u) { u.deleted = true; u.updatedAt = now; });
     if (demoCount) {
       DB.items = DB.items.filter(function (x) { return !x.demo; });
       DB.gear = (DB.gear || []).filter(function (x) { return !x.demo; });
@@ -3189,7 +3205,9 @@
 
     saveAll();
     renderAssets(); renderGear(); renderTrips(); renderStats();
-    toast('已清理：重复 ' + removed + ' 条' + (demoCount ? '，示例 ' + demoCount + ' 条' : ''));
+    toast('已清理：重复 ' + removed + ' 条' +
+      (demoCount ? '，示例 ' + demoCount + ' 条' : '') +
+      (orphanUsage.length ? '，失效使用记录 ' + orphanUsage.length + ' 条' : ''));
   }
 
   function importBackup(file) {
@@ -4045,8 +4063,11 @@
     var realMode = hasRealData();
     var list = (DB.usage || []).filter(function (u) {
       if (!u || u.deleted) return false;
+      var owner = u.assetId ? assetById(u.assetId) : null;
       /* 有真实物品时，示例数据带出来的使用记录不再展示（它们不上云，也不属于你的账目） */
-      if (realMode && (u.demo || (assetById(u.assetId) || {}).demo)) return false;
+      if (realMode && (u.demo || (owner && owner.demo))) return false;
+      /* 关联的资产已经不在了（示例物品被清掉后留下的老记录），也不展示 */
+      if (u.assetId && (!owner || owner.deleted)) return false;
       if (state.usageRange === '30' && diffDays(u.date) > 30) return false;
       if (state.usageRange === 'year' && parseDate(u.date) && parseDate(u.date).getFullYear() !== year) return false;
       if (!q) return true;
