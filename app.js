@@ -69,6 +69,24 @@
   function saveCats() {
     try { localStorage.setItem(LS_CATS, JSON.stringify(CATS)); } catch (e) {}
   }
+  /* 分类的完整来源 = 分类列表 + 已有物品里出现过的分类。
+     物品分类会跟着云端数据走，所以换设备后也能自动补齐。 */
+  function allCats() {
+    var list = CATS.slice();
+    (DB.items || []).forEach(function (it) {
+      if (it.deleted || !it.cat) return;
+      if (list.indexOf(it.cat) < 0) list.push(it.cat);
+    });
+    return list;
+  }
+  /* 把物品里的历史分类并进分类列表，统一各处的下拉框 */
+  function syncCatsFromItems() {
+    var before = CATS.length;
+    (DB.items || []).forEach(function (it) {
+      if (!it.deleted && it.cat && CATS.indexOf(it.cat) < 0) CATS.push(it.cat);
+    });
+    if (CATS.length !== before) saveCats();
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -88,7 +106,8 @@
     return esc(v || '📦');
   }
   function emojiIcon(v, cat) {
-    if (typeof v === 'string' && v && !isImgIcon(v) && !svgIcon(v)) return v;
+    if (typeof v === 'string' && v && !isImgIcon(v) && !svgIcon(v) &&
+        !(window.GL_ICON3D && window.GL_ICON3D[v])) return v;
     return catIcon(cat);
   }
   function group(n, dropZero) {
@@ -603,11 +622,20 @@
   });
   if (tagsMigrated) saveAll();
 
+  /* 老数据 / 云端同步回来的记录可能没有 order：按当前默认顺序补一个显式位。
+     用 x.5 插在相邻整数之间，不挤动已有顺序；下次拖动时再统一重编号。 */
+  var orderFilled = fillMissingOrder('asset');
+  if (fillMissingOrder('gear')) orderFilled = true;
+  if (orderFilled) saveAll();
+  syncCatsFromItems();
+
   var state = {
     tab: 'assets',
     status: '全部',
     cat: '全部分类',
     sort: 'date',
+    assetSorting: false,
+    gearSorting: false,
     q: '',
     assetView: (function () {
       try {
@@ -686,6 +714,52 @@
     else state.formIconImg = url || null;
     renderFormIcon(kind);
   }
+
+  /* 内置图标分组 → 资产分类：选图标时自动带出分类，选完仍可手动改。
+     不在表里的分组、以及相册/拍照来的图片，都会把分类清空。 */
+  var ICON_GROUP_CAT = {
+    '徒步': '户外',
+    '露营': '户外',
+    '数码': '数码',
+    '家电': '家电',
+    '家居': '生活用品'
+  };
+  /* 家居组里的家具 / 家电，单独归类 */
+  var ICON_ID_CAT = {
+    'armchair': '家具', 'sofa': '家具', 'bed': '家具', 'door': '家具', 'home': '家具',
+    'chair': '家具', 'couch': '家具', 'wardrobe': '家具', 'file-cabinet': '家具',
+    'fridge': '家电', 'washing-machine': '家电', 'microwave': '家电',
+    'air-conditioner': '家电', 'television': '家电'
+  };
+  /* 优先用用户分类列表里存在的名字，没有就退回备选 */
+  function pickIconCat(preferred, fallback) {
+    var cats = allCats();
+    if (preferred && cats.indexOf(preferred) >= 0) return preferred;
+    if (fallback && cats.indexOf(fallback) >= 0) return fallback;
+    return '';
+  }
+  function iconCategoryOf(groupName, iconId) {
+    if (!groupName) return '';
+    /* 穿着：鞋子单独归「鞋子」，其余衣服类都归「衣服」 */
+    if (groupName === '穿着') {
+      if (iconId === 'shoe' || iconId === 'shoe-off') return pickIconCat('鞋子', '衣服');
+      return pickIconCat('衣服', '户外');
+    }
+    if (groupName === '家电') return pickIconCat('家电', '生活用品');
+    if (groupName === '家居' && ICON_ID_CAT[iconId]) return pickIconCat(ICON_ID_CAT[iconId], '生活用品');
+    return pickIconCat(ICON_GROUP_CAT[groupName] || '', '');
+  }
+  function applyIconCategory(groupName, iconId) {
+    if (state.editingId) return;   /* 编辑旧物品时不动用户已有分类 */
+    var form = $('#editor-form');
+    if (!form || !form.elements.cat) return;
+    var sel = form.elements.cat;
+    var cat = iconCategoryOf(groupName, iconId);
+    if (cat && allCats().indexOf(cat) < 0) cat = '';
+    sel.value = cat;
+    syncGearCatRow(sel.value, true);
+  }
+
   function renderFormPhoto(kind) {
     var gear = kind === 'gear';
     var src = gear ? state.gearFormPhoto : state.formPhoto;
@@ -710,23 +784,25 @@
     var use3d = !!(window.GL_ICON3D && window.GL_ICON3D_GROUPS);
     var groups = use3d ? window.GL_ICON3D_GROUPS : (window.GL_ICON_GROUPS || []);
     if (!groups.length) return;
+    var tip = '用内置彩色图标，或从相册选一张、拍一张当图标。';
+    if (attr === 'icon') tip += ' 选内置图标会自动匹配分类。';
     var html = '<div class="icon-src">' +
       '<button type="button" class="icon-src-btn" data-icon-src="album" data-icon-for="' + attr + '">相册</button>' +
       '<button type="button" class="icon-src-btn" data-icon-src="camera" data-icon-for="' + attr + '">拍照</button>' +
       '<button type="button" class="text-btn danger icon-clear hidden" data-icon-src="clear" data-icon-for="' + attr + '">清除图片</button>' +
-      '</div><p class="icon-src-tip">用内置彩色图标，或从相册选一张、拍一张当图标。</p>';
+      '</div><p class="icon-src-tip">' + tip + '</p>';
     html += groups.map(function (grp) {
       return '<div class="icon-group"><div class="icon-group-t">' + esc(grp.name) + '</div><div class="icon-grid">' +
         grp.ids.map(function (id) {
           if (use3d) {
             var src = window.GL_ICON3D[id];
             if (!src) return '';
-            return '<button type="button" data-' + attr + '="' + id + '" title="' + esc(id) + '" aria-label="' + esc(id) + '">' +
+            return '<button type="button" data-' + attr + '="' + id + '" data-icon-group="' + esc(grp.name) + '" title="' + esc(id) + '" aria-label="' + esc(id) + '">' +
               '<img class="ico-3d" src="' + src + '" alt="" loading="lazy"></button>';
           }
           var svg = window.GL_ICONS && window.GL_ICONS[id];
           if (!svg) return '';
-          return '<button type="button" data-' + attr + '="' + id + '" title="' + esc(id) + '" aria-label="' + esc(id) + '">' +
+          return '<button type="button" data-' + attr + '="' + id + '" data-icon-group="' + esc(grp.name) + '" title="' + esc(id) + '" aria-label="' + esc(id) + '">' +
             '<svg viewBox="0 0 24 24" aria-hidden="true">' + svg + '</svg></button>';
         }).join('') + '</div></div>';
     }).join('');
@@ -818,24 +894,102 @@
     return map[cat] || map['其他'];
   }
 
+  function setAssetSort(v) {
+    state.sort = v;
+  }
+
+  /* ---------- 手动排序 ----------
+     每条记录用 order 记位置（数字越小越靠前），跟记录一起同步。
+     老数据没有 order 时，按原来的默认顺序算一个「虚拟位」，
+     第一次拖动后再统一写成 0、1、2… 的实数位。 */
+  function sortOrderOf(rec) {
+    return (rec && typeof rec.order === 'number' && isFinite(rec.order)) ? rec.order : null;
+  }
+  function orderOfAll(recs, baseCmp) {
+    var base = recs.slice().sort(baseCmp);
+    var rank = {};
+    base.forEach(function (r, i) { rank[r.id] = i; });
+    return recs.slice().sort(function (a, b) {
+      var oa = sortOrderOf(a), ob = sortOrderOf(b);
+      if (oa == null) oa = rank[a.id] + 0.5;
+      if (ob == null) ob = rank[b.id] + 0.5;
+      if (oa !== ob) return oa - ob;
+      return rank[a.id] - rank[b.id];
+    });
+  }
+  function assetBaseCmp(a, b) {
+    var d = String(b.purchaseDate || '').localeCompare(String(a.purchaseDate || ''));
+    if (d) return d;
+    /* 同一天购买的按原有记录顺序（新加的在前），跟加入排序功能前的显示一致 */
+    var ia = DB.items.indexOf(a), ib = DB.items.indexOf(b);
+    if (ia !== ib) return ia - ib;
+    return String(a.id) < String(b.id) ? -1 : (String(a.id) > String(b.id) ? 1 : 0);
+  }
+  function gearBaseCmp(a, b) {
+    return DB.gear.indexOf(a) - DB.gear.indexOf(b);
+  }
+  /* 新条目排到最前：取现有最小 order 再减一 */
+  function nextTopOrder(recs) {
+    var min = null;
+    (recs || []).forEach(function (r) {
+      if (!r || r.deleted) return;
+      var o = sortOrderOf(r);
+      if (o != null && (min == null || o < min)) min = o;
+    });
+    return min == null ? 0 : min - 1;
+  }
+  /* 给没有 order 的记录补一个位置，保持当前看到的顺序 */
+  function fillMissingOrder(kind) {
+    var recs = kind === 'asset' ? DB.items : DB.gear;
+    var baseCmp = kind === 'asset' ? assetBaseCmp : gearBaseCmp;
+    var live = recs.filter(function (r) { return !r.deleted; });
+    var hasMissing = false;
+    live.forEach(function (r) { if (sortOrderOf(r) == null) hasMissing = true; });
+    if (!hasMissing) return false;
+    var ordered = orderOfAll(live, baseCmp);
+    var changed = false, last = null;
+    for (var i = 0; i < ordered.length; i++) {
+      var cur = sortOrderOf(ordered[i]);
+      if (cur != null) { last = cur; continue; }
+      var next = null;
+      for (var j = i + 1; j < ordered.length; j++) {
+        var oj = sortOrderOf(ordered[j]);
+        if (oj != null) { next = oj; break; }
+      }
+      var val;
+      if (last == null && next == null) val = i;
+      else if (last == null) val = next - 1;
+      else if (next == null) val = last + 1;
+      else val = (last + next) / 2;
+      ordered[i].order = val;
+      last = val;
+      changed = true;
+    }
+    return changed;
+  }
+
   function filteredItems() {
     var q = state.q.trim().toLowerCase();
-    return DB.items.filter(function (it) {
+    var list = DB.items.filter(function (it) {
       if (it.deleted) return false;
       var c = calc(it);
       if (state.status !== '全部' && statusOf(it, c) !== state.status) return false;
-      if (state.cat !== '全部分类' && it.cat !== state.cat) return false;
+      if (state.cat === '未分类') {
+        if (it.cat) return false;
+      } else if (state.cat !== '全部分类' && it.cat !== state.cat) return false;
       if (q) {
         var hay = (it.name + ' ' + (it.notes || '') + ' ' + it.cat + ' ' + (it.gearCat || '')).toLowerCase();
         if (hay.indexOf(q) < 0) return false;
       }
       return true;
-    }).sort(function (a, b) {
+    });
+    if (state.sort === 'manual') return orderOfAll(list, assetBaseCmp);
+    return list.sort(function (a, b) {
       var ca = calc(a), cb = calc(b);
       if (state.sort === 'daily') return (cb.daily == null ? -1e15 : cb.daily) - (ca.daily == null ? -1e15 : ca.daily);
       if (state.sort === 'price') return cb.net - ca.net;
       if (state.sort === 'days') return cb.days - ca.days;
-      return (b.purchaseDate || '').localeCompare(a.purchaseDate || '');
+      return assetBaseCmp(a, b);
     });
   }
 
@@ -858,10 +1012,13 @@
     var statusHtml = STATES.map(function (s) {
       return '<button class="chip ' + (state.status === s ? 'on' : '') + '" data-afstatus="' + s + '">' + s + '</button>';
     }).join('');
-    var catHtml = ['全部分类'].concat(CATS).map(function (c) {
+    var allCatList = allCats();
+    var catHtml = ['全部分类'].concat(allCatList).concat(
+      (allCatList.indexOf('未分类') < 0 && DB.items.some(function (it) { return !it.deleted && !it.cat; })) ? ['未分类'] : []
+    ).map(function (c) {
       return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-afcat2="' + esc(c) + '">' + esc(c) + '</button>';
     }).join('');
-    var sortHtml = [['date', '默认'], ['daily', '按日均'], ['price', '按价格'], ['days', '按天数']].map(function (o) {
+    var sortHtml = [['date', '默认'], ['daily', '按日均'], ['price', '按价格'], ['days', '按天数'], ['manual', '自定义']].map(function (o) {
       return '<button class="chip ' + (state.sort === o[0] ? 'on' : '') + '" data-afsort="' + o[0] + '">' + o[1] + '</button>';
     }).join('');
     body.innerHTML =
@@ -964,11 +1121,11 @@
   }
 
   function renderCatChips() {
-    var all = ['全部分类'].concat(CATS);
-    /* 历史数据 / 导入备份里可能有不在列表中的分类，也一并给入口 */
-    DB.items.forEach(function (it) {
-      if (!it.deleted && it.cat && all.indexOf(it.cat) < 0) all.push(it.cat);
-    });
+    var all = ['全部分类'].concat(allCats());
+    /* 图标不在任何分组里时分类会留空，给一个「未分类」入口 */
+    if (all.indexOf('未分类') < 0 && DB.items.some(function (it) { return !it.deleted && !it.cat; })) {
+      all.push('未分类');
+    }
     renderChips($('#cat-chips'), all.map(function (c) {
       return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-cat="' + esc(c) + '">' + esc(c) + '</button>';
     }).join(''));
@@ -1046,6 +1203,13 @@
     var box = $('#asset-list');
     box.className = 'asset-box view-' + view;
 
+    var asortBtn = $('#btn-asort');
+    if (asortBtn) {
+      asortBtn.textContent = state.assetSorting ? '完成' : '排序';
+      asortBtn.classList.toggle('on', state.assetSorting);
+      asortBtn.setAttribute('aria-pressed', state.assetSorting ? 'true' : 'false');
+    }
+
     box.innerHTML = list.map(function (it) {
       var c = calc(it);
       sumTotal += c.net;
@@ -1068,6 +1232,8 @@
       if (view === 'text') return assetTextHtml(it, c, badge);
       return assetRowHtml(it, c, badge, sub);
     }).join('');
+
+    if (state.assetSorting) buildSortUi(box, 'asset');
 
     var vbtns = document.querySelectorAll('#asset-viewswitch [data-aview]');
     for (var i = 0; i < vbtns.length; i++) {
@@ -1117,7 +1283,7 @@
       ['退役时间', c.expireAt ? fmtDate(c.expireAt) : '无', ''],
       ['使用状态', st, c.overdue ? 'red' : ''],
       ['到期提醒', it.hasExpiry ? '开启' : '关闭', ''],
-      ['分类', it.cat, '']
+      ['分类', it.cat || '未分类', '']
     ];
     if (it.gearCat) cells.push(['装备分类', it.gearCat, '']);
     if (it.weight) cells.push(['重量', fmtWeight(it.weight), 'mono']);
@@ -1292,12 +1458,12 @@
     f.elements.lifeValue.value = d.lifeValue || '';
     f.elements.lifeUnit.value = d.lifeUnit || '年';
     f.elements.hasExpiry.checked = !!d.hasExpiry;
-    var cats = CATS.slice();
+    var cats = allCats();
     if (d.cat && cats.indexOf(d.cat) < 0) cats.push(d.cat);
-    f.elements.cat.innerHTML = cats.map(function (c) {
+    f.elements.cat.innerHTML = '<option value="">未分类</option>' + cats.map(function (c) {
       return '<option>' + esc(c) + '</option>';
     }).join('');
-    f.elements.cat.value = d.cat || cats[0];
+    f.elements.cat.value = d.cat != null ? d.cat : cats[0];
     f.elements.status.value = d.status || '服役中';
     f.elements.subtractResale.checked = !!d.subtractResale;
     f.elements.resale.value = d.resale || '';
@@ -1406,6 +1572,7 @@
       useLog: prevItem ? (prevItem.useLog || []) : [],
       tags: parseTags(el.tags.value),
       notes: el.notes.value.trim(),
+      order: prevItem ? prevItem.order : nextTopOrder(DB.items),
       updatedAt: Date.now(),
       deleted: false
     };
@@ -1431,7 +1598,7 @@
      ========================================================= */
   function filteredGear() {
     var q = state.gearQ.trim().toLowerCase();
-    return DB.gear.filter(function (g) {
+    var list = DB.gear.filter(function (g) {
       if (g.deleted) return false;
       if (state.gearCat !== '全部' && mapGearCat(g) !== state.gearCat) return false;
       if (state.gearBrand !== '全部' && g.brand !== state.gearBrand) return false;
@@ -1446,6 +1613,8 @@
       var hay = [g.name, g.brand, g.type, (g.tags || []).join(' ')].join(' ').toLowerCase();
       return hay.indexOf(q) >= 0;
     });
+    /* 装备库始终按手动顺序排，再按分类分组展示 */
+    return orderOfAll(list, gearBaseCmp);
   }
 
   function catIcon(c) { return GEAR_CAT_ICON[c] || '📦'; }
@@ -1557,6 +1726,14 @@
 
     var box = $('#gear-grid');
     box.className = 'gear-groups view-' + view;
+
+    var gsortBtn = $('#btn-gsort');
+    if (gsortBtn) {
+      gsortBtn.textContent = state.gearSorting ? '完成' : '排序';
+      gsortBtn.classList.toggle('on', state.gearSorting);
+      gsortBtn.setAttribute('aria-pressed', state.gearSorting ? 'true' : 'false');
+    }
+
     box.innerHTML = order.map(function (k) {
       var items = groups[k], sum = 0, wsum = 0, hasW = false;
       items.forEach(function (g) {
@@ -1565,7 +1742,7 @@
         if (w) { wsum += w; hasW = true; }
       });
       var sumTxt = items.length + '件' + (hasW ? ' · ' + fmtWeight(wsum) : '') + ' · ' + cash(sum);
-      return '<section class="gear-group' + (state.gearCollapsed[k] ? ' col' : '') + '">' +
+      return '<section class="gear-group' + (state.gearCollapsed[k] ? ' col' : '') + '" data-sort-cat="' + esc(k) + '">' +
         '<button class="gg-head" data-gcol="' + esc(k) + '">' +
           '<span class="gg-ico">' + catIcon(k) + '</span>' +
           '<span class="gg-name">' + esc(k) + '</span>' +
@@ -1575,6 +1752,8 @@
         '<div class="gg-body">' + items.map(rowHtml).join('') + '</div>' +
       '</section>';
     }).join('');
+
+    if (state.gearSorting) buildSortUi(box, 'gear');
 
     var btns = document.querySelectorAll('#gear-viewswitch [data-gview]');
     for (var i = 0; i < btns.length; i++) {
@@ -1591,6 +1770,351 @@
     var gearNote = document.querySelector('#view-gear .note');
     if (gearNote) gearNote.classList.toggle('hidden', list.length === 0);
     updateGearFilterBtn();
+  }
+
+  /* =========================================================
+     拖拽排序
+     ========================================================= */
+  var ASSET_ITEM_SEL = '.asset, .acard, .aitem';
+  var GEAR_ITEM_SEL = '.card, .g-list, .g-text';
+  var DRAG_HANDLE_HTML =
+    '<button type="button" class="drag-handle" data-drag-handle aria-label="拖动排序" title="按住拖动">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<circle cx="9" cy="6" r="1.7"/><circle cx="15" cy="6" r="1.7"/>' +
+        '<circle cx="9" cy="12" r="1.7"/><circle cx="15" cy="12" r="1.7"/>' +
+        '<circle cx="9" cy="18" r="1.7"/><circle cx="15" cy="18" r="1.7"/>' +
+      '</svg>' +
+    '</button>';
+
+  function addDragHandle(el) {
+    if (!el || el.querySelector('[data-drag-handle]')) return;
+    el.classList.add('sort-item');
+    el.insertAdjacentHTML('beforeend', DRAG_HANDLE_HTML);
+  }
+
+  function buildSortUi(box, kind) {
+    if (!box) return;
+    box.classList.add('sorting');
+    if (kind === 'asset') {
+      if (!$$(ASSET_ITEM_SEL, box).length) return;
+      var top = document.createElement('div');
+      top.className = 'sort-top';
+      top.setAttribute('data-sort-top', '');
+      top.textContent = '拖到这里，放到最前面';
+      box.insertBefore(top, box.firstChild);
+      $$(ASSET_ITEM_SEL, box).forEach(addDragHandle);
+      return;
+    }
+    $$('.gg-body', box).forEach(function (body) {
+      var items = $$(GEAR_ITEM_SEL, body);
+      if (!items.length) return;
+      var group = body.parentNode;
+      var cat = group ? (group.getAttribute('data-sort-cat') || '') : '';
+      var top = document.createElement('div');
+      top.className = 'sort-top';
+      top.setAttribute('data-sort-top', cat);
+      top.textContent = cat ? '拖到这里，置顶「' + cat + '」' : '拖到这里，放到最前面';
+      body.insertBefore(top, body.firstChild);
+      items.forEach(addDragHandle);
+    });
+  }
+
+  function sortItemsOf(kind, scope) {
+    return $$(kind === 'asset' ? ASSET_ITEM_SEL : GEAR_ITEM_SEL, scope);
+  }
+  function sortItemId(kind, el) {
+    if (!el) return '';
+    return kind === 'asset'
+      ? (el.getAttribute('data-id') || '')
+      : (el.getAttribute('data-gid') || el.getAttribute('data-open') || '');
+  }
+
+  var dragCtx = null;
+  var dragRaf = 0;
+
+  function bindSortDrag(box, kind) {
+    if (!box || box.getAttribute('data-sort-bound')) return;
+    box.setAttribute('data-sort-bound', '1');
+    box.addEventListener('pointerdown', function (e) {
+      if (e.button != null && e.button !== 0) return;
+      var sorting = kind === 'asset' ? state.assetSorting : state.gearSorting;
+      if (!sorting || dragCtx) return;
+      var target = e.target;
+      var handle = target && target.closest ? target.closest('[data-drag-handle]') : null;
+      if (!handle || !box.contains(handle)) return;
+      var item = handle.closest(kind === 'asset' ? ASSET_ITEM_SEL : GEAR_ITEM_SEL);
+      if (!item) return;
+      e.preventDefault();
+      startSortDrag(e, kind, item, handle);
+    });
+  }
+
+  function findScrollParent(el) {
+    var node = el ? el.parentNode : null;
+    while (node && node.nodeType === 1) {
+      var st = window.getComputedStyle(node);
+      if ((st.overflowY === 'auto' || st.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 2) return node;
+      node = node.parentNode;
+    }
+    return window;
+  }
+
+  function startSortDrag(e, kind, item, handle) {
+    var rect = item.getBoundingClientRect();
+    var box = kind === 'asset' ? $('#asset-list') : $('#gear-grid');
+    var section = kind === 'gear' && item.closest ? item.closest('.gear-group') : null;
+    dragCtx = {
+      kind: kind, box: box, group: kind === 'gear' ? item.parentNode : box,
+      item: item, handle: handle, id: sortItemId(kind, item),
+      pointerId: e.pointerId,
+      startX: e.clientX, startY: e.clientY,
+      lastX: e.clientX, lastY: e.clientY,
+      rect: rect, moved: false, ghost: null, line: null,
+      items: [], sourceIndex: -1, insert: -1, topHot: false,
+      groupCat: section ? (section.getAttribute('data-sort-cat') || '') : '',
+      scrollEl: findScrollParent(item)
+    };
+    try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    window.addEventListener('pointermove', onSortDragMove, { passive: false });
+    window.addEventListener('pointerup', onSortDragEnd);
+    window.addEventListener('pointercancel', onSortDragCancel);
+    window.addEventListener('keydown', onSortDragKey);
+  }
+
+  function onSortDragMove(e) {
+    var d = dragCtx;
+    if (!d || e.pointerId !== d.pointerId) return;
+    d.lastX = e.clientX;
+    d.lastY = e.clientY;
+    if (!d.moved) {
+      if (Math.abs(e.clientX - d.startX) < 5 && Math.abs(e.clientY - d.startY) < 5) return;
+      beginSortDrag(d);
+    }
+    e.preventDefault();
+  }
+
+  function beginSortDrag(d) {
+    d.moved = true;
+    d.items = sortItemsOf(d.kind, d.group);
+    d.sourceIndex = d.items.indexOf(d.item);
+    document.body.classList.add('sort-dragging');
+    d.item.classList.add('dragging');
+
+    var ghost = d.item.cloneNode(true);
+    ghost.classList.remove('dragging');
+    ghost.classList.add('drag-ghost');
+    ghost.style.left = d.rect.left + 'px';
+    ghost.style.top = d.rect.top + 'px';
+    ghost.style.width = d.rect.width + 'px';
+    ghost.style.height = d.rect.height + 'px';
+    document.body.appendChild(ghost);
+    d.ghost = ghost;
+
+    d.line = document.createElement('div');
+    d.line.className = 'drop-line';
+    document.body.appendChild(d.line);
+
+    dragRaf = requestAnimationFrame(sortDragTick);
+  }
+
+  function sortDragTick() {
+    var d = dragCtx;
+    if (!d || !d.moved) return;
+    var dx = d.lastX - d.startX, dy = d.lastY - d.startY;
+    d.ghost.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.015)';
+    autoScrollTick(d);
+    updateSortInsert(d, d.lastX, d.lastY);
+    dragRaf = requestAnimationFrame(sortDragTick);
+  }
+
+  function autoScrollTick(d) {
+    var edge = 76;
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    var delta = 0;
+    if (d.lastY < edge) delta = -Math.max(2, Math.ceil((edge - d.lastY) / 5));
+    else if (d.lastY > vh - edge) delta = Math.max(2, Math.ceil((d.lastY - (vh - edge)) / 5));
+    if (!delta) return;
+    if (d.scrollEl === window) window.scrollBy(0, delta);
+    else d.scrollEl.scrollTop += delta;
+  }
+
+  function updateSortInsert(d, x, y) {
+    var items = d.items && d.items.length ? d.items : sortItemsOf(d.kind, d.group);
+    d.items = items;
+    var idx = items.length;
+    var hot = null;
+    var strips = $$('[data-sort-top]', d.group);
+    for (var s = 0; s < strips.length; s++) {
+      var sr = strips[s].getBoundingClientRect();
+      if (x >= sr.left - 6 && x <= sr.right + 6 && y >= sr.top - 8 && y <= sr.bottom + 8) {
+        hot = strips[s];
+        idx = 0;
+        break;
+      }
+    }
+
+    if (!hot && items.length) {
+      var gr = d.group.getBoundingClientRect();
+      if (d.kind === 'gear' && (y < gr.top - 36 || y > gr.bottom + 72)) {
+        return;   /* 拖出本分类：保持上一次的位置 */
+      }
+      if (window.getComputedStyle(d.group).display === 'grid') {
+        var bestIdx = -1, bestDist = Infinity, before = true;
+        for (var i = 0; i < items.length; i++) {
+          var r = items[i].getBoundingClientRect();
+          var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          var dist = Math.abs(x - cx) + Math.abs(y - cy) * 1.35;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+            before = x < cx;
+          }
+        }
+        idx = before ? bestIdx : bestIdx + 1;
+        var lastRect = items[items.length - 1].getBoundingClientRect();
+        if (y > lastRect.bottom) idx = items.length;
+      } else {
+        idx = items.length;
+        for (var j = 0; j < items.length; j++) {
+          var rr = items[j].getBoundingClientRect();
+          if (y < rr.top + rr.height / 2) { idx = j; break; }
+        }
+      }
+    }
+
+    d.insert = idx;
+    d.topHot = !!hot;
+    strips.forEach(function (el) { el.classList.toggle('hot', el === hot); });
+    if (hot) {
+      if (d.line) d.line.style.display = 'none';
+      return;
+    }
+
+    if (!d.line) return;
+    var target = null;
+    if (idx >= items.length) target = items.length ? items[items.length - 1].getBoundingClientRect() : null;
+    else target = items[idx].getBoundingClientRect();
+    if (!target) { d.line.style.display = 'none'; return; }
+    d.line.style.display = 'block';
+    d.line.style.left = Math.round(target.left) + 'px';
+    d.line.style.width = Math.round(target.width) + 'px';
+    d.line.style.top = Math.round(idx >= items.length ? target.bottom + 2 : target.top - 5) + 'px';
+  }
+
+  function onSortDragEnd(e) {
+    var d = dragCtx;
+    if (!d || e.pointerId !== d.pointerId) return;
+    if (d.moved) updateSortInsert(d, d.lastX, d.lastY);   /* 松手瞬间按最后坐标再算一次，避免用上一帧的位置 */
+    var moved = d.moved;
+    var items = (d.items || []).slice();
+    var sourceIndex = d.sourceIndex >= 0 ? d.sourceIndex : items.indexOf(d.item);
+    var insert = d.insert;
+    var topHot = d.topHot;
+    var id = d.id, kind = d.kind, groupCat = d.groupCat;
+    cleanupSortDrag();
+    if (!moved || !id || sourceIndex < 0 || !items.length) return;
+
+    var finalIdx = insert;
+    if (!topHot && insert > sourceIndex) finalIdx = insert - 1;
+    if (!topHot && finalIdx === sourceIndex) return;   /* 位置没变 */
+    if (topHot && sourceIndex === 0) return;           /* 已经在最前 */
+
+    var opts = { toTop: topHot, groupCat: groupCat };
+    if (!topHot) {
+      if (insert >= items.length) opts.toEnd = true;
+      else opts.beforeId = sortItemId(kind, items[insert]);
+      if (!opts.beforeId && !opts.toEnd) return;
+    }
+    if (reorderRecord(kind, id, opts)) toast('顺序已保存');
+  }
+
+  function onSortDragCancel(e) {
+    var d = dragCtx;
+    if (!d || (e && e.pointerId != null && e.pointerId !== d.pointerId)) return;
+    cleanupSortDrag();
+  }
+
+  function onSortDragKey(e) {
+    if (e.key === 'Escape') cleanupSortDrag();
+  }
+
+  function cleanupSortDrag() {
+    var d = dragCtx;
+    if (!d) return;
+    if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
+    window.removeEventListener('pointermove', onSortDragMove);
+    window.removeEventListener('pointerup', onSortDragEnd);
+    window.removeEventListener('pointercancel', onSortDragCancel);
+    window.removeEventListener('keydown', onSortDragKey);
+    if (d.ghost && d.ghost.parentNode) d.ghost.parentNode.removeChild(d.ghost);
+    if (d.line && d.line.parentNode) d.line.parentNode.removeChild(d.line);
+    if (d.item) d.item.classList.remove('dragging');
+    if (d.box) $$('.sort-top.hot', d.box).forEach(function (el) { el.classList.remove('hot'); });
+    document.body.classList.remove('sort-dragging');
+    try { if (d.handle && d.handle.releasePointerCapture) d.handle.releasePointerCapture(d.pointerId); } catch (err) {}
+    dragCtx = null;
+  }
+
+  /* 把拖动结果写成 order 字段：先按当前顺序整理成完整列表，
+     再把拖动的条目插到目标位置，最后统一编号 0、1、2… */
+  function reorderRecord(kind, dragId, opts) {
+    opts = opts || {};
+    var recs = kind === 'asset' ? DB.items : DB.gear;
+    var baseCmp = kind === 'asset' ? assetBaseCmp : gearBaseCmp;
+    var ordered = orderOfAll(recs.filter(function (r) { return !r.deleted; }), baseCmp);
+    var from = -1;
+    for (var i = 0; i < ordered.length; i++) {
+      if (ordered[i].id === dragId) { from = i; break; }
+    }
+    if (from < 0) return false;
+    var moved = ordered.splice(from, 1)[0];
+    var to = ordered.length;
+    if (opts.toTop) {
+      to = 0;
+      if (kind === 'gear' && opts.groupCat) {
+        for (var j = 0; j < ordered.length; j++) {
+          if (mapGearCat(ordered[j]) === opts.groupCat) { to = j; break; }
+        }
+      }
+    } else if (!opts.toEnd) {
+      for (var k = 0; k < ordered.length; k++) {
+        if (ordered[k].id === opts.beforeId) { to = k; break; }
+      }
+    }
+    ordered.splice(to, 0, moved);
+
+    var now = Date.now(), changed = false;
+    ordered.forEach(function (r, idx) {
+      if (sortOrderOf(r) !== idx) {
+        r.order = idx;
+        r.updatedAt = now;
+        changed = true;
+      }
+    });
+    if (changed) {
+      saveAll();
+      if (kind === 'asset') {
+        setAssetSort('manual');
+        renderAssets();
+      } else {
+        renderGear();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function toggleAssetSort() {
+    state.assetSorting = !state.assetSorting;
+    if (state.assetSorting) setAssetSort('manual');
+    renderAssets();
+    toast(state.assetSorting ? '按住条目上的 ⠿ 拖动，拖到顶部横条可置顶' : '排序已保存');
+  }
+
+  function toggleGearSort() {
+    state.gearSorting = !state.gearSorting;
+    renderGear();
+    toast(state.gearSorting ? '按住条目上的 ⠿ 拖动，拖到顶部横条可置顶' : '排序已保存');
   }
 
   /* ---------- 装备筛选 ---------- */
@@ -1809,6 +2333,9 @@
     var el = $('#geditor-form').elements;
     var name = el.name.value.trim();
     if (!name) { toast('请填写装备名称'); return; }
+    var prevGear = state.editingGearId
+      ? DB.gear.find(function (x) { return x.id === state.editingGearId; })
+      : null;
 
     var gear = {
       id: state.editingGearId || newGearId(),
@@ -1825,6 +2352,7 @@
       tags: parseTags(el.tags.value),
       specs: parseSpecs(el.specs.value),
       perf: [],
+      order: prevGear ? prevGear.order : nextTopOrder(DB.gear),
       updatedAt: Date.now(),
       deleted: false
     };
@@ -2245,7 +2773,7 @@
     body.innerHTML =
       '<div class="mine-card">' +
         mineRow('📁', '分类管理', '自定义物品分类，可以增删改', 'id="mine-cats"',
-          '<span class="mine-val">' + CATS.length + ' 个</span><span class="mine-chev">›</span>') +
+          '<span class="mine-val">' + allCats().length + ' 个</span><span class="mine-chev">›</span>') +
       '</div>' +
       '<div class="mine-title">数据导出</div>' +
       '<div class="mine-card">' +
@@ -2289,8 +2817,7 @@
 
   function renderCatsList() {
     var counts = catCounts();
-    var extra = Object.keys(counts).filter(function (c) { return CATS.indexOf(c) < 0; });
-    var all = CATS.concat(extra);
+    var all = allCats();
     $('#cats-list').innerHTML = all.map(function (c) {
       return '<div class="cat-row">' +
         '<span class="cat-name">' + esc(c) + '</span>' +
@@ -2305,8 +2832,9 @@
     var sel = $('#editor-cat');
     if (!sel) return;
     var cur = sel.value;
-    sel.innerHTML = CATS.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('');
-    if (CATS.indexOf(cur) >= 0) sel.value = cur;
+    var cats = allCats();
+    sel.innerHTML = '<option value="">未分类</option>' + cats.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('');
+    if (cur === '' || cats.indexOf(cur) >= 0) sel.value = cur;
   }
 
   function refreshAfterCats() {
@@ -2324,7 +2852,7 @@
     var name = input.value.trim();
     if (!name) { toast('先输入分类名称'); input.focus(); return; }
     if (name.length > 8) { toast('分类名最多 8 个字'); return; }
-    if (CATS.indexOf(name) >= 0) { toast('已经有这个分类了'); return; }
+    if (allCats().indexOf(name) >= 0) { toast('已经有这个分类了'); return; }
     CATS.push(name);
     input.value = '';
     refreshAfterCats();
@@ -2337,7 +2865,7 @@
     next = String(next).trim();
     if (!next || next === name) return;
     if (next.length > 8) { toast('分类名最多 8 个字'); return; }
-    if (CATS.indexOf(next) >= 0) { toast('已经有同名分类了'); return; }
+    if (allCats().indexOf(next) >= 0) { toast('已经有同名分类了'); return; }
 
     var i = CATS.indexOf(name);
     if (i >= 0) CATS[i] = next;
@@ -2350,17 +2878,18 @@
   }
 
   function deleteCat(name) {
-    if (CATS.length <= 1) { toast('至少保留一个分类'); return; }
+    var all = allCats();
+    if (all.length <= 1) { toast('至少保留一个分类'); return; }
     var n = 0;
     DB.items.forEach(function (it) { if (!it.deleted && it.cat === name) n++; });
-    var rest = CATS.filter(function (c) { return c !== name; });
+    var rest = all.filter(function (c) { return c !== name; });
     var fallback = rest.indexOf('其他') >= 0 ? '其他' : rest[0];
     var msg = n
       ? '「' + name + '」下还有 ' + n + ' 件物品，删除后会移到「' + fallback + '」。继续吗？'
       : '删除分类「' + name + '」？';
     if (!window.confirm(msg)) return;
 
-    CATS = rest;
+    CATS = CATS.filter(function (c) { return c !== name; });
     DB.items.forEach(function (it) { if (it.cat === name) it.cat = fallback; });
     if (state.cat === name) state.cat = '全部分类';
     saveAll();
@@ -2829,6 +3358,8 @@
   function closeSheet(sel) { $(sel).classList.remove('open'); }
 
   function switchTab(name) {
+    state.assetSorting = false;
+    state.gearSorting = false;
     state.tab = name;
     $$('.tab').forEach(function (t) { t.classList.toggle('on', t.getAttribute('data-tab') === name); });
     $$('.view').forEach(function (v) { v.classList.add('hidden'); });
@@ -3078,7 +3609,8 @@
           baseCount: Number(cols[9]) || 0,
           useLog: [],
           notes: cols[10] || '',
-          icon: '📦'
+          icon: '📦',
+          order: nextTopOrder(DB.items)
         });
         n++;
       }
@@ -4421,6 +4953,13 @@
   document.addEventListener('click', function (ev) {
     var el = ev.target;
 
+    // 排序模式：拖拽手柄和条目本身都不触发点击，避免误开详情
+    if (el.closest) {
+      if (el.closest('[data-drag-handle]')) return;
+      if ((state.assetSorting && el.closest('#asset-list')) ||
+          (state.gearSorting && el.closest('#gear-grid'))) return;
+    }
+
     // 关闭弹层
     if (el.closest('[data-close]')) {
       var sheet = el.closest('.sheet');
@@ -4458,7 +4997,8 @@
     }
     var afsort = el.closest('[data-afsort]');
     if (afsort) {
-      state.sort = afsort.getAttribute('data-afsort');
+      setAssetSort(afsort.getAttribute('data-afsort'));
+      if (state.sort !== 'manual' && state.assetSorting) state.assetSorting = false;
       renderAssetFilter();
       renderAssets();
       return;
@@ -4825,6 +5365,7 @@
     if (ip) {
       state.formIcon = ip.getAttribute('data-icon');
       state.formIconImg = null;
+      applyIconCategory(ip.getAttribute('data-icon-group'), state.formIcon);
       renderFormIcon('asset');
       $('#icon-picker').classList.add('hidden');
       return;
@@ -4839,6 +5380,7 @@
       pickFile('image/*', function (file) {
         readImageFile(file, 200, 0.82, function (url) {
           setFormIconImg(iconKind, url);
+          if (iconKind === 'asset') applyIconCategory('', '');
           $(iconKind === 'gear' ? '#gicon-picker' : '#icon-picker').classList.add('hidden');
         });
       }, iconAct === 'camera' ? 'environment' : null);
@@ -4911,6 +5453,10 @@
   $('#btn-new-fab').addEventListener('click', function () { openEditor(null, null); });
   $('#btn-g-new').addEventListener('click', function () { openGearEditor(null); });
   $('#btn-g-new-top').addEventListener('click', function () { openGearEditor(null); });
+  var asortInit = $('#btn-asort');
+  if (asortInit) asortInit.addEventListener('click', toggleAssetSort);
+  var gsortInit = $('#btn-gsort');
+  if (gsortInit) gsortInit.addEventListener('click', toggleGearSort);
 
   // 装备编辑表单
   $('#geditor-form').addEventListener('submit', saveGearEditor);
@@ -5048,7 +5594,7 @@
   /* =========================================================
      初始化
      ========================================================= */
-  $('#editor-cat').innerHTML = CATS.map(function (c) {
+  $('#editor-cat').innerHTML = '<option value="">未分类</option>' + allCats().map(function (c) {
     return '<option>' + esc(c) + '</option>';
   }).join('');
   $('#editor-cat').addEventListener('change', function () {
@@ -5142,6 +5688,10 @@
     updateChipsEdge($('#trip-chips'));
     updateChipsEdge($('#usage-chips'));
   });
+
+  /* 排序拖拽：容器是固定的，绑定一次即可 */
+  bindSortDrag($('#asset-list'), 'asset');
+  bindSortDrag($('#gear-grid'), 'gear');
 
   renderAssets();
   renderGear();

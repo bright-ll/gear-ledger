@@ -188,31 +188,6 @@ window.GL_ICON_GROUPS = [
     ]
   },
   {
-    "name": "饮食",
-    "ids": [
-      "bottle",
-      "cup",
-      "glass",
-      "glass-full",
-      "coffee",
-      "grill",
-      "tools-kitchen",
-      "bowl",
-      "soup",
-      "egg",
-      "apple",
-      "meat",
-      "cheese",
-      "grain",
-      "salt",
-      "pepper",
-      "chocolate",
-      "cookie",
-      "ice-cream",
-      "milk"
-    ]
-  },
-  {
     "name": "数码",
     "ids": [
       "device-mobile",

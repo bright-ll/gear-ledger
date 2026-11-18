@@ -1895,3 +1895,71 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
 @media(min-width:1080px){
   #view-trips{max-width:1000px;margin:0 auto}
 }
+
+/* =========================================================
+   拖拽排序
+   ========================================================= */
+.filter-btn.sort-btn{background:var(--card)}
+.filter-btn.sort-btn.on{background:var(--blue);color:#fff}
+.sort-item{position:relative}
+.drag-handle{
+  position:absolute;z-index:5;width:34px;height:34px;border-radius:11px;
+  display:grid;place-items:center;background:var(--card2);color:var(--sub);
+  box-shadow:0 2px 8px rgba(20,22,28,.10);touch-action:none;cursor:grab;
+}
+.drag-handle svg{width:18px;height:18px;fill:currentColor;pointer-events:none}
+.drag-handle:active{cursor:grabbing}
+/* 列表 / 文字视图：手柄放右侧中部，正文让出位置 */
+.asset-box.sorting .asset,
+.asset-box.sorting .aitem,
+.gear-groups.sorting .g-list,
+.gear-groups.sorting .g-text{padding-right:56px}
+.asset-box.sorting .asset .drag-handle,
+.asset-box.sorting .aitem .drag-handle,
+.gear-groups.sorting .g-list .drag-handle,
+.gear-groups.sorting .g-text .drag-handle{right:12px;top:50%;transform:translateY(-50%)}
+/* 宫格：手柄压在右上角；装备卡片的收藏心形在排序时隐藏，避免打架 */
+.asset-box.sorting .acard .drag-handle,
+.gear-groups.sorting .card .drag-handle{right:6px;top:6px}
+.gear-groups.sorting .heart{display:none}
+/* 排序时点按不缩放、不误触打开 */
+.asset-box.sorting .asset:active,
+.asset-box.sorting .acard:active,
+.asset-box.sorting .aitem:active,
+.gear-groups.sorting .card:active,
+.gear-groups.sorting .g-list:active,
+.gear-groups.sorting .g-text:active{transform:none}
+
+/* 「拖到这里置顶」横条：贴住滚动区顶部，长列表里也够得着 */
+.sort-top{
+  position:sticky;top:6px;z-index:6;grid-column:1/-1;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  margin:2px 0 10px;padding:11px 12px;
+  border:1.5px dashed var(--blue);border-radius:12px;
+  background:var(--blue-soft);color:var(--blue);
+  font-size:12.5px;font-weight:700;letter-spacing:.02em;
+  pointer-events:none;user-select:none;
+}
+.sort-top.hot{background:var(--blue);border-style:solid;color:#fff}
+
+/* 拖动中的原位占位与跟手浮层 */
+.sort-item.dragging{opacity:.28}
+.drag-ghost{
+  position:fixed;z-index:9999;pointer-events:none;overflow:hidden;opacity:.97;
+  border-radius:var(--radius);box-shadow:0 18px 42px rgba(20,22,28,.28);
+  will-change:transform;
+}
+.drag-ghost *{pointer-events:none}
+.drag-ghost .drag-handle{visibility:hidden}
+.drop-line{
+  position:fixed;z-index:9998;height:3px;border-radius:3px;display:none;
+  background:var(--blue);box-shadow:0 0 0 3px rgba(67,84,240,.16);
+  pointer-events:none;
+}
+body.sort-dragging{user-select:none;-webkit-user-select:none;cursor:grabbing}
+body.sort-dragging .asset,
+body.sort-dragging .acard,
+body.sort-dragging .aitem,
+body.sort-dragging .card,
+body.sort-dragging .g-list,
+body.sort-dragging .g-text{transition:none}
