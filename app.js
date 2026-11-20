@@ -8,7 +8,11 @@
   /* ---------- 常量 ---------- */
   var LS = 'gearLedger.v2';
   var DEMO_TIP_KEY = 'gearLedger.v2.demoTipClosed';
+  var FIRST_RUN_KEY = 'gearLedger.firstRunDone';
   var LS_CATS = 'gearLedger.cats';
+  var LS_OUTDOOR_CATS = 'gearLedger.outdoorCats';
+  var LS_STATS_SCOPE = 'gear-ledger-stats-scope';
+  var LS_USAGE_SCOPE = 'gear-ledger-usage-scope';
   var LS_CUR = 'gearLedger.cur';
   var LS_THEME = 'gearLedger.theme';
   var DEFAULT_CATS = ['户外', '数码', '家电', '生活用品', '家具', '其他'];
@@ -88,6 +92,105 @@
     if (CATS.length !== before) saveCats();
   }
 
+  /* ---------- 户外范围 ----------
+     分类级默认 + 物品级覆盖，决定分析页算不算这件物品。
+     分类归属只存本地（和分类列表一致），物品级覆盖跟着记录同步。 */
+  var OUTDOOR_CATS = loadOutdoorCats();
+  function loadOutdoorCats() {
+    try {
+      var raw = localStorage.getItem(LS_OUTDOOR_CATS);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      return (o && typeof o === 'object') ? o : null;
+    } catch (e) { return null; }
+  }
+  function saveOutdoorCats() {
+    try { localStorage.setItem(LS_OUTDOOR_CATS, JSON.stringify(OUTDOOR_CATS || {})); } catch (e) {}
+  }
+  /* 首次升级按历史数据推测：只有「整类物品都带装备资料」才算户外，
+     避免数码里一个头灯把整类数码都算进来。 */
+  function ensureOutdoorCats() {
+    if (OUTDOOR_CATS) return;
+    var map = {}, total = {}, evidence = {};
+    (DB.items || []).forEach(function (it) {
+      if (!it || it.deleted || !it.cat) return;
+      total[it.cat] = (total[it.cat] || 0) + 1;
+      if (it.gearCat || it.catalogId) evidence[it.cat] = (evidence[it.cat] || 0) + 1;
+    });
+    allCats().forEach(function (c) {
+      map[c] = (c === '户外') || (total[c] > 0 && evidence[c] === total[c]);
+    });
+    OUTDOOR_CATS = map;
+    saveOutdoorCats();
+  }
+  function isOutdoorCat(name) {
+    if (!name) return false;
+    if (OUTDOOR_CATS && OUTDOOR_CATS[name] != null) return !!OUTDOOR_CATS[name];
+    return name === '户外';
+  }
+  function isOutdoorItem(it) {
+    if (!it || it.deleted) return false;
+    if (it.outdoor === true) return true;
+    if (it.outdoor === false) return false;
+    return isOutdoorCat(it.cat);
+  }
+
+  /* ---------- 使用计数方式 ----------
+     none 不统计 / daily 常用按天折算 / trip 户外专用按行程 / manual 偶尔使用手动 +1 */
+  var USE_MODE_LABEL = {
+    none: '不统计',
+    daily: '常用（每天）',
+    trip: '户外专用（按行程）',
+    manual: '偶尔使用（手动 +1）'
+  };
+  function useModeOf(it) {
+    if (!it) return 'none';
+    var m = it.useMode;
+    if (m === 'daily' || m === 'trip' || m === 'manual' || m === 'none') return m;
+    /* 兼容旧数据：trackPerUse 为真时，户外物品按行程、其余按手动 */
+    return it.trackPerUse ? (isOutdoorItem(it) ? 'trip' : 'manual') : 'none';
+  }
+  function tracksUse(it) { return useModeOf(it) !== 'none'; }
+
+  /* 常用设备：按自然日折算，含首尾；不写 usage 记录 */
+  function dailyUseDays(it) {
+    if (!it || useModeOf(it) !== 'daily') return 0;
+    var from = parseDate(it.dailyFrom || it.purchaseDate);
+    var end = it.dailyTo ? parseDate(it.dailyTo) : parseDate(todayStr());
+    var today = parseDate(todayStr());
+    if (!from || !end || !today) return 0;
+    if (end > today) end = today;
+    if (end < from) return 0;
+    return Math.round((end - from) / 86400000) + 1;
+  }
+
+  /* 统计某天及之后的使用次数，用于常用设备避免和按天折算重复 */
+  function usageCountSince(assetId, from) {
+    var n = 0;
+    usageRecordsOf(assetId).forEach(function (u) {
+      if (!from || !u.date || u.date >= from) n += Number(u.count) || 1;
+    });
+    return n;
+  }
+
+  /* 首次升级：把老的 trackPerUse 推断成使用计数方式 */
+  function ensureUseModes() {
+    var changed = false;
+    (DB.items || []).forEach(function (it) {
+      if (!it || it.deleted || it.useMode) return;
+      it.useMode = it.trackPerUse ? (isOutdoorItem(it) ? 'trip' : 'manual') : 'none';
+      it.trackPerUse = it.useMode !== 'none';
+      changed = true;
+    });
+    if (changed) saveAll();
+  }
+
+  function defaultUseMode(d) {
+    if (d && (d.gearCat || d.catalogId)) return 'trip';
+    if (d && d.cat && isOutdoorCat(d.cat)) return 'trip';
+    return 'manual';
+  }
+
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
@@ -152,12 +255,27 @@
 
   var usageCountCache = null;
   var toastTimer;
-  function toast(msg) {
+  var toastAction = null;
+  function toast(msg, opts) {
     var t = $('#toast');
-    t.textContent = msg;
+    var action = opts && opts.action;
+    t.innerHTML = '<span class="toast-msg">' + esc(msg) + '</span>' +
+      (action ? '<button class="toast-act" type="button">' + esc(action) + '</button>' : '');
     t.classList.add('on');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove('on'); }, 1900);
+    toastAction = (action && opts.onAction) ? opts.onAction : null;
+    toastTimer = setTimeout(function () {
+      t.classList.remove('on');
+      toastAction = null;
+    }, action ? 6000 : 1900);
+  }
+  function runToastAction() {
+    var fn = toastAction;
+    if (!fn) return;
+    toastAction = null;
+    clearTimeout(toastTimer);
+    $('#toast').classList.remove('on');
+    fn();
   }
 
   /* ---------- 存储 ---------- */
@@ -628,6 +746,8 @@
   if (fillMissingOrder('gear')) orderFilled = true;
   if (orderFilled) saveAll();
   syncCatsFromItems();
+  ensureOutdoorCats();
+  ensureUseModes();
 
   var state = {
     tab: 'assets',
@@ -636,6 +756,11 @@
     sort: 'date',
     assetSorting: false,
     gearSorting: false,
+    statsRange: 'all',
+    statsScope: (function () {
+      try { return localStorage.getItem(LS_STATS_SCOPE) === 'all' ? 'all' : 'outdoor'; } catch (e) { return 'outdoor'; }
+    })(),
+    scrollPos: {},
     q: '',
     assetView: (function () {
       try {
@@ -665,9 +790,13 @@
     usageAssetId: null,
     usageQ: '',
     usageRange: 'all',
+    usageScope: (function () {
+      try { return localStorage.getItem(LS_USAGE_SCOPE) === 'all' ? 'all' : 'outdoor'; } catch (e) { return 'outdoor'; }
+    })(),
     pickerMode: null,
     pickerTripId: null,
     pickerSelected: {},
+    pickerScope: 'outdoor',
     pickerQ: '',
     tplEditingId: null,
     tplViewId: null,
@@ -859,9 +988,17 @@
     var overdue = !!(it.hasExpiry && expireAt && todayStr() > expireAt);
     var net = it.subtractResale ? Math.max(total - (Number(it.resale) || 0), 0) : total;
     var daily = days > 0 ? net / days : null;
-    var used = (Number(it.baseCount) || 0) + usageTotal(it.id);
+    var mode = useModeOf(it);
+    var rowUsed = usageTotal(it.id);
+    if (mode === 'daily') {
+      var from = it.dailyFrom || it.purchaseDate;
+      /* 按天折算的区间内不再重复算明细记录 */
+      if (from) rowUsed = Math.max(0, rowUsed - usageCountSince(it.id, from));
+      rowUsed += dailyUseDays(it);
+    }
+    var used = (Number(it.baseCount) || 0) + rowUsed;
     var unitCost = used > 0 ? net / used : null;
-    var perUse = it.trackPerUse ? unitCost : null;
+    var perUse = tracksUse(it) ? unitCost : null;
     return {
       total: total, net: net, days: days, life: life, expireAt: expireAt, overdue: overdue,
       daily: daily, used: used, unitCost: unitCost, perUse: perUse
@@ -1131,6 +1268,17 @@
     }).join(''));
   }
 
+  function renderFirstRun() {
+    var el = $('#firstrun');
+    if (!el) return;
+    var done = false;
+    try { done = localStorage.getItem(FIRST_RUN_KEY) === '1'; } catch (e) {}
+    var show = !done && !hasRealData();
+    el.classList.toggle('hidden', !show);
+    var tip = $('#demo-tip');
+    if (show && tip) tip.classList.add('hidden');
+  }
+
   function renderDemoTip() {
     var el = $('#demo-tip');
     if (!el) return;
@@ -1138,8 +1286,8 @@
     var tipText = el.querySelector('div');
     if (tipText) {
       tipText.textContent = phoneLayout
-        ? '下方是示例数据。点任意一条进去看看，或点右下角的「＋」记下自己的第一件。'
-        : '下方是示例数据。点任意一条进去看看，或点「新增」记下自己的第一件。';
+        ? '下方是示例数据。点任意一条进去看看，或点右下角的「＋」记下自己的第一件装备。'
+        : '下方是示例数据。点任意一条进去看看，或点「新增」记下自己的第一件装备。';
     }
     var closed = false;
     try { closed = localStorage.getItem(DEMO_TIP_KEY) === '1'; } catch (e) {}
@@ -1192,10 +1340,40 @@
     '</div>';
   }
 
+  function syncQClear() {
+    var b = $('#btn-q-clear');
+    if (!b) return;
+    b.classList.toggle('hidden', !(state.q || '').trim());
+  }
+
+  /* 保存前给个成本预览：总价怎么来的、计划年限下日均大概多少 */
+  function updateCostPreview() {
+    var f = $('#editor-form');
+    var box = $('#editor-cost');
+    if (!f || !box) return;
+    var el = f.elements;
+    var price = num(el.price.value);
+    var qty = Math.max(1, Math.floor(num(el.qty.value)));
+    var extra = num(el.extra.value);
+    var total = price * qty + extra;
+    var life = num(el.lifeValue.value);
+    var unit = el.lifeUnit.value;
+    var days = 0;
+    if (life > 0) days = unit === '年' ? Math.round(life * 365) : (unit === '月' ? Math.round(life * 30) : life);
+    if (!price && !extra) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    var txt = '总价 <b>' + cash(total) + '</b>';
+    if (qty > 1) txt += '（' + cash(price) + ' × ' + qty + (extra ? ' + ' + cash(extra) : '') + '）';
+    else if (extra) txt += '（含附加 ' + cash(extra) + '）';
+    if (days > 0) txt += ' · 按计划 ' + life + ' ' + unit + '，日均约 <b>' + cash(total / days) + '/天</b>';
+    box.innerHTML = txt;
+  }
+
   function renderAssets() {
     updateAssetFilterBtn();
     renderCatChips();
     renderDemoTip();
+    renderFirstRun();
 
     var list = filteredItems();
     var sumTotal = 0, sumDaily = 0, sumDailyKnown = 0, sumCount = 0;
@@ -1205,10 +1383,12 @@
 
     var asortBtn = $('#btn-asort');
     if (asortBtn) {
-      asortBtn.textContent = state.assetSorting ? '完成' : '排序';
+      asortBtn.textContent = state.assetSorting ? '完成' : '调整顺序';
       asortBtn.classList.toggle('on', state.assetSorting);
       asortBtn.setAttribute('aria-pressed', state.assetSorting ? 'true' : 'false');
     }
+    var sortHint = $('#asset-sort-hint');
+    if (sortHint) sortHint.classList.toggle('hidden', !state.assetSorting);
 
     box.innerHTML = list.map(function (it) {
       var c = calc(it);
@@ -1223,9 +1403,16 @@
       else if (st === '预备役') badge = '<span class="a-badge" style="background:#eef7ff;color:#3b82f6">预备役</span>';
 
       var sub = '';
-      if (it.trackPerUse) {
-        sub = '<div class="a-sub">次均 ' + (c.unitCost == null ? '数据不足' : '' + cash(c.unitCost)) +
-              ' · 已用 ' + c.used + ' 次</div>';
+      var useMode = useModeOf(it);
+      if (useMode !== 'none') {
+        var usedTxt = useMode === 'daily'
+          ? '已用 ' + c.used + ' 天 · 按天折算'
+          : '已用 ' + c.used + ' 次' + (useMode === 'trip' ? ' · 行程自动' : '');
+        var quickBtn = useMode === 'manual'
+          ? '<button type="button" class="a-quick" data-quick-use="' + it.id + '">+1 用过</button>'
+          : '';
+        sub = '<div class="a-sub a-sub-use"><span>次均 ' + (c.unitCost == null ? '数据不足' : '' + cash(c.unitCost)) +
+              ' · ' + usedTxt + '</span>' + quickBtn + '</div>';
       }
 
       if (view === 'grid') return assetCardHtml(it, c, badge);
@@ -1242,16 +1429,39 @@
 
     var isFiltered = state.cat !== '全部分类' || state.status !== '全部' || !!state.q.trim();
     var phoneLayout = window.matchMedia && window.matchMedia('(max-width: 699px)').matches;
-    $('#asset-empty-title').textContent = isFiltered ? '这个筛选下没有物品' : '还没有记录';
+    $('#asset-empty-title').textContent = isFiltered ? '这个筛选下没有物品' : '还没有记下第一件装备';
     $('#asset-empty-sub').textContent = isFiltered
       ? '换个分类或状态，也可以点下面回到全部'
-      : (phoneLayout ? '点右下角的「＋」，把第一件东西记下来' : '点下面的「新增」，把第一件东西记下来');
+      : (phoneLayout ? '点右下角的「＋」，把第一件装备记下来' : '点下面的「新增」，把第一件装备记下来');
     $('#asset-empty-reset').classList.toggle('hidden', !isFiltered);
     $('#asset-empty').classList.toggle('hidden', list.length > 0);
     $('#sum-total').innerHTML = cash(sumTotal);
     $('#sum-daily').innerHTML = (list.length && !sumDailyKnown) ? '数据不足' : cash(sumDaily);
     $('#sum-count').textContent = sumCount;
-    $('#hero-title').textContent = state.status === '全部' ? '全部物品' : state.status;
+    var scopeName = state.status !== '全部' ? state.status
+      : (state.cat !== '全部分类' ? state.cat
+      : (state.q.trim() ? '搜索结果' : ''));
+    $('#hero-title').textContent = scopeName || '全部资产';
+    var heroScope = $('#hero-scope');
+    if (heroScope) heroScope.classList.toggle('hidden', !scopeName);
+
+    /* 户外占比：始终按全量资产算，不受当前筛选影响，方便和「全部资产」对账 */
+    var outNet = 0, allNet = 0;
+    DB.items.forEach(function (x) {
+      if (!x || x.deleted) return;
+      var oc = calc(x);
+      allNet += oc.net;
+      if (isOutdoorItem(x)) outNet += oc.net;
+    });
+    var heroOut = $('#hero-outdoor');
+    if (heroOut) {
+      // 只在显示全量时出现：筛选后「其中」会和当前合计对不上
+      var showOut = !scopeName && outNet > 0 && outNet < allNet;
+      heroOut.classList.toggle('hidden', !showOut);
+      if (showOut) {
+        heroOut.innerHTML = '其中户外 ' + cash(outNet) + ' · 占 ' + Math.round(outNet / allNet * 100) + '%';
+      }
+    }
 
     var assetEnd = $('#asset-end');
     if (assetEnd) {
@@ -1294,11 +1504,18 @@
       return '<div class="' + cls + '"><div class="k">' + x[0] + '</div><div class="v ' + x[2] + '">' + x[1] + '</div></div>';
     }).join('');
 
+    var detailMode = useModeOf(it);
+    var modeText = USE_MODE_LABEL[detailMode] || USE_MODE_LABEL.none;
+    if (detailMode === 'daily') {
+      modeText += ' · ' + fmtDate(it.dailyFrom || it.purchaseDate) + ' 起' +
+        (it.dailyTo ? '，' + fmtDate(it.dailyTo) + ' 停' : '');
+    }
     var cells2 = [
       ['是否减去二手价值', it.subtractResale ? '是' : '否'],
       ['二手价值', it.resale ? '' + cash(it.resale) : '未填写'],
-      ['列表显示单次成本', it.trackPerUse ? '是' : '否'],
-      ['累计使用', c.used ? c.used + ' 次' : '还没有记录']
+      ['使用计数', modeText],
+      ['累计使用', c.used ? (detailMode === 'daily' ? c.used + ' 天（按天折算）' : c.used + ' 次') : '还没有记录'],
+      ['计入户外分析', (isOutdoorItem(it) ? '是' : '否') + (it.outdoor == null ? ' · 跟随分类' : ' · 单独设置')]
     ];
     var grid2 = cells2.map(function (x) {
       return '<div class="dg"><div class="k">' + x[0] + '</div><div class="v">' + x[1] + '</div></div>';
@@ -1317,15 +1534,30 @@
         '<button class="text-btn danger" data-usage-del="' + u.id + '">撤销</button>' +
       '</div>';
     }).join('');
-    var useBlock = '<div class="detail-note usage-block">' +
-      '<div class="usage-head"><div><div class="usage-title">使用履历</div>' +
-        '<div class="usage-sub">累计 ' + c.used + ' 次 · 单次成本 ' +
-          (c.unitCost == null ? '数据不足' : cash(c.unitCost)) +
-          ' · 上次 ' + (usageList.length ? fmtDate(usageList[0].date) : '无') + '</div></div>' +
-        '<button class="btn-main usage-add-btn" data-usage-add="' + it.id + '">补录</button>' +
-      '</div>' +
-      (usageHtml || '<div class="usage-empty">还没有使用记录。完成行程会自动生成，也可以手动补录。</div>') +
-    '</div>';
+    var canAddUsage = detailMode === 'trip' || detailMode === 'manual';
+    var useBlock = '';
+    if (detailMode === 'daily') {
+      useBlock = '<div class="detail-note usage-block">' +
+        '<div class="usage-head"><div><div class="usage-title">使用履历</div>' +
+          '<div class="usage-sub">累计 ' + c.used + ' 天 · 单次成本 ' +
+            (c.unitCost == null ? '数据不足' : cash(c.unitCost)) +
+            ' · ' + fmtDate(it.dailyFrom || it.purchaseDate) + ' 起' +
+            (it.dailyTo ? '，' + fmtDate(it.dailyTo) + ' 停' : '') + '</div></div></div>' +
+        '<div class="usage-empty">常用设备按天折算，不占用使用记录。</div>' +
+      '</div>';
+    } else if (detailMode !== 'none' || usageList.length) {
+      useBlock = '<div class="detail-note usage-block">' +
+        '<div class="usage-head"><div><div class="usage-title">使用履历</div>' +
+          '<div class="usage-sub">累计 ' + c.used + ' 次 · 单次成本 ' +
+            (c.unitCost == null ? '数据不足' : cash(c.unitCost)) +
+            ' · 上次 ' + (usageList.length ? fmtDate(usageList[0].date) : '无') + '</div></div>' +
+          (canAddUsage ? '<button class="btn-main usage-add-btn" data-usage-add="' + it.id + '">补录</button>' : '') +
+        '</div>' +
+        (usageHtml || '<div class="usage-empty">还没有使用记录。' +
+          (detailMode === 'trip' ? '完成行程会自动生成，漏记可以补录修正。' : '完成行程会自动生成，也可以手动补录。') +
+          '</div>') +
+      '</div>';
+    }
 
     var noteBlock = it.notes
       ? '<div class="detail-note"><div style="font-size:12px;color:#9aa0ae;margin-bottom:4px">备注</div>' + esc(it.notes) + '</div>'
@@ -1364,12 +1596,35 @@
       ? '<div class="detail-tags">' + it.tags.map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('') + '</div>'
       : '';
 
+    var heroBadge = '<span class="dh-badge">' + st + '</span>';
+    var detailHero =
+      '<div class="dh' + (c.overdue ? ' bad' : '') + '">' +
+        '<div class="dh-top">' +
+          '<span class="dh-ico">' + iconMarkup(it.iconImg || it.icon) + '</span>' +
+          '<div class="dh-name">' + esc(it.name) + '</div>' + heroBadge +
+        '</div>' +
+        '<div class="dh-nums">' +
+          '<div><b>' + (c.daily == null ? '—' : cash(c.daily)) + '</b><span>日均' + (c.daily == null ? '' : ' / 天') + '</span></div>' +
+          '<div><b>' + (c.unitCost == null ? '—' : cash(c.unitCost)) + '</b><span>单次成本</span></div>' +
+          '<div><b>' + c.days + '</b><span>持有天数</span></div>' +
+        '</div>' +
+        '<div class="dh-foot">总价 ' + cash(c.net) + ' · 已用 ' + c.used + ' 次' +
+          (c.daily == null ? ' · 日期缺失，日均暂时算不出' : '') + '</div>' +
+      '</div>';
+
+    var detailMore =
+      '<div class="detail-toggle-wrap">' +
+        '<button type="button" class="detail-toggle" id="detail-toggle" aria-expanded="false">' +
+          '<span>全部明细</span><span class="more-chev" aria-hidden="true">›</span></button>' +
+      '</div>' +
+      '<div class="detail-more hidden" id="detail-more">' +
+        '<div class="detail-card"><div class="detail-grid">' + grid + '</div></div>' +
+        '<div class="detail-card"><div class="detail-grid">' + grid2 + '</div></div>' +
+      '</div>';
+
     $('#detail-body').innerHTML =
       (it.photo ? '<div class="detail-photo"><img src="' + esc(it.photo) + '" alt="' + esc(it.name) + '"></div>' : '') +
-      '<div class="detail-icon" style="background:' + iconBg(it.cat) + '">' + iconMarkup(it.iconImg || it.icon) + '</div>' +
-      '<div class="detail-card"><div class="detail-grid">' + grid + '</div></div>' +
-      '<div class="detail-card"><div class="detail-grid">' + grid2 + '</div></div>' +
-      tagBlock + useBlock + gearBlock + unlinkBlock + noteBlock + '<div style="height:8px"></div>';
+      detailHero + tagBlock + useBlock + detailMore + gearBlock + unlinkBlock + noteBlock + '<div style="height:8px"></div>';
 
     var linkBtn = $('#btn-to-gear');
     if (linkBtn) {
@@ -1435,6 +1690,25 @@
     if (!isOutdoor && clear) sel.value = '';
   }
 
+  /* 常用模式才显示起算/停用日期，同时给出计数方式说明 */
+  function syncDailyRows() {
+    var sel = $('#editor-useMode');
+    var box = $('#editor-daily-rows');
+    if (!sel || !box) return;
+    box.classList.toggle('hidden', sel.value !== 'daily');
+    var tip = $('#editor-useMode-tip');
+    if (!tip) return;
+    if (sel.value === 'daily') {
+      tip.textContent = '按天折算：从起算日到今天，每天算 1 次；这段时间的明细记录不重复计。';
+    } else if (sel.value === 'trip') {
+      tip.textContent = '只在行程确认时自动计次；列表不提供「+1」，漏记可以在详情里补录。';
+    } else if (sel.value === 'manual') {
+      tip.textContent = '平时点「+1 用过」计次；上行程也会自动记一次。';
+    } else {
+      tip.textContent = '不统计使用次数，单次成本显示「未开启」。';
+    }
+  }
+
   function openEditor(item, preset) {
     var f = $('#editor-form');
     state.editingId = item ? item.id : null;
@@ -1467,7 +1741,22 @@
     f.elements.status.value = d.status || '服役中';
     f.elements.subtractResale.checked = !!d.subtractResale;
     f.elements.resale.value = d.resale || '';
-    f.elements.trackPerUse.checked = !!d.trackPerUse;
+    var formMode;
+    if (item) formMode = useModeOf(d);
+    else if (d.useMode) formMode = d.useMode;
+    else formMode = defaultUseMode({
+      cat: f.elements.cat.value,
+      gearCat: d.gearCat || '',
+      catalogId: state.editingCatalogId
+    });
+    if (formMode !== 'daily' && formMode !== 'trip' && formMode !== 'manual') formMode = 'none';
+    if (f.elements.useMode) f.elements.useMode.value = formMode;
+    if (f.elements.dailyFrom) {
+      f.elements.dailyFrom.value = formMode === 'daily'
+        ? (d.dailyFrom || d.purchaseDate || todayStr()) : '';
+    }
+    if (f.elements.dailyTo) f.elements.dailyTo.value = formMode === 'daily' ? (d.dailyTo || '') : '';
+    syncDailyRows();
     if (f.elements.baseCount) f.elements.baseCount.value = d.baseCount || 0;
     f.elements.notes.value = d.notes || '';
 
@@ -1478,6 +1767,9 @@
         return '<option>' + c + '</option>';
       }).join('');
       gcatSel.value = d.gearCat || '';
+    }
+    if (f.elements.outdoor) {
+      f.elements.outdoor.value = d.outdoor === true ? '1' : (d.outdoor === false ? '0' : '');
     }
     syncGearCatRow(f.elements.cat.value, false);
     f.elements.weight.value = d.weight ? d.weight : '';
@@ -1496,6 +1788,18 @@
         linkRow.classList.add('hidden');
       }
     }
+
+    // 新增时提示上次没保存的草稿；编辑时清掉草稿提示
+    if (!item) {
+      var draft = readDraft();
+      renderDraftBar(draft && (String(draft.name || '').trim() || String(draft.price || '').trim()) ? draft : null);
+    } else {
+      renderDraftBar(null);
+    }
+
+    if ($('#editor-more')) $('#editor-more').classList.add('hidden');
+    if ($('#editor-more-toggle')) $('#editor-more-toggle').setAttribute('aria-expanded', 'false');
+    updateCostPreview();
 
     openSheet('#editor-sheet');
   }
@@ -1546,11 +1850,23 @@
     var prevItem = state.editingId
       ? DB.items.find(function (x) { return x.id === state.editingId; })
       : null;
+
+    var useMode = el.useMode ? el.useMode.value : 'none';
+    if (useMode !== 'daily' && useMode !== 'trip' && useMode !== 'manual') useMode = 'none';
+    var dailyFrom = useMode === 'daily' ? (el.dailyFrom.value || el.purchaseDate.value || todayStr()) : null;
+    var dailyTo = useMode === 'daily' ? (el.dailyTo.value || null) : null;
+    if (dailyFrom && dailyTo && dailyTo < dailyFrom) {
+      toast('停用日期不能早于起算日');
+      return;
+    }
+    if (useMode === 'daily' && el.status.value === '已退役' && !dailyTo) dailyTo = todayStr();
+
     var item = {
       id: state.editingId || uid(),
       name: el.name.value.trim(),
       cat: el.cat.value,
       gearCat: el.gearCat ? el.gearCat.value : '',
+      outdoor: el.outdoor ? (el.outdoor.value === '1' ? true : (el.outdoor.value === '0' ? false : null)) : null,
       weight: Number(el.weight.value) || 0,
       officialPrice: Number(el.officialPrice.value) || 0,
       icon: state.formIcon,
@@ -1566,7 +1882,10 @@
       status: el.status.value,
       subtractResale: el.subtractResale.checked,
       resale: Number(el.resale.value) || 0,
-      trackPerUse: el.trackPerUse.checked,
+      useMode: useMode,
+      dailyFrom: dailyFrom,
+      dailyTo: dailyTo,
+      trackPerUse: useMode !== 'none',
       baseCount: el.baseCount ? (Number(el.baseCount.value) || 0) : (prevItem ? (Number(prevItem.baseCount) || 0) : 0),
       catalogId: state.editingCatalogId || null,
       useLog: prevItem ? (prevItem.useLog || []) : [],
@@ -1586,11 +1905,13 @@
     }
     syncGearFromItem(item);
     saveAll();
+    clearDraft();
     closeSheet('#editor-sheet');
     renderAssets();
     renderGear();
-    if (isNew && item.catalogId) toast('已加入资产');
-    else toast(idx >= 0 ? '已更新' : '已添加');
+    var modeHint = ' · ' + (USE_MODE_LABEL[useMode] || USE_MODE_LABEL.none);
+    if (isNew && item.catalogId) toast('已加入资产' + modeHint);
+    else toast((idx >= 0 ? '已更新' : '已添加') + modeHint);
   }
 
   /* =========================================================
@@ -1729,10 +2050,12 @@
 
     var gsortBtn = $('#btn-gsort');
     if (gsortBtn) {
-      gsortBtn.textContent = state.gearSorting ? '完成' : '排序';
+      gsortBtn.textContent = state.gearSorting ? '完成' : '调整顺序';
       gsortBtn.classList.toggle('on', state.gearSorting);
       gsortBtn.setAttribute('aria-pressed', state.gearSorting ? 'true' : 'false');
     }
+    var gsortHint = $('#gear-sort-hint');
+    if (gsortHint) gsortHint.classList.toggle('hidden', !state.gearSorting);
 
     box.innerHTML = order.map(function (k) {
       var items = groups[k], sum = 0, wsum = 0, hasW = false;
@@ -2210,7 +2533,7 @@
         '<div class="kv"><span>持有天数</span><b>' + oc.days + ' 天</b></div>' +
         '<div class="kv"><span>计入成本</span><b>' + cash(oc.net) + '</b></div>' +
         '<div class="kv"><span>日均</span><b>' + (oc.daily == null ? '数据不足' : cash(oc.daily) + ' / 天') + '</b></div>' +
-        '<div class="kv"><span>次均</span><b>' + (oc.perUse == null ? (own.trackPerUse ? '数据不足' : '未开启') : '' + cash(oc.perUse)) + '</b></div>' +
+        '<div class="kv"><span>次均</span><b>' + (oc.perUse == null ? (tracksUse(own) ? '数据不足' : '未开启') : '' + cash(oc.perUse)) + '</b></div>' +
       '</div>';
     }
 
@@ -2449,15 +2772,67 @@
   /* =========================================================
      分析
      ========================================================= */
+  var STATS_RANGES = [
+    { k: 'all', label: '全部' },
+    { k: 'year', label: '今年' },
+    { k: '12m', label: '近 12 个月' }
+  ];
+  function statsScopeHtml() {
+    var allN = 0, outN = 0;
+    (DB.items || []).forEach(function (x) {
+      if (!x || x.deleted) return;
+      var q = Number(x.qty) || 1;
+      allN += q;
+      if (isOutdoorItem(x)) outN += q;
+    });
+    return '<div class="st-scope">' +
+      '<button class="st-scope-btn' + (state.statsScope === 'outdoor' ? ' on' : '') +
+        '" data-stats-scope="outdoor">户外装备 <b>' + outN + '</b></button>' +
+      '<button class="st-scope-btn' + (state.statsScope === 'all' ? ' on' : '') +
+        '" data-stats-scope="all">全部资产 <b>' + allN + '</b></button>' +
+    '</div>';
+  }
+  function statsRangeHtml() {
+    return '<div class="st-range">' + STATS_RANGES.map(function (r) {
+      return '<button class="chip' + (state.statsRange === r.k ? ' on' : '') +
+        '" data-stats-range="' + r.k + '">' + r.label + '</button>';
+    }).join('') + '<span class="st-range-note">按购买日期统计</span></div>';
+  }
+  function statsHeadHtml() {
+    return statsScopeHtml() + statsRangeHtml();
+  }
+
   function renderStats() {
-    var items = DB.items.filter(function (x) { return !x.deleted; })
+    var scope = state.statsScope === 'all' ? 'all' : 'outdoor';
+    var all = DB.items.filter(function (x) { return !x.deleted; })
       .map(function (it) { return { it: it, c: calc(it) }; });
+    var scoped = scope === 'outdoor'
+      ? all.filter(function (x) { return isOutdoorItem(x.it); })
+      : all;
+    var scopeNote = scope === 'outdoor' ? ' · 仅户外装备' : ' · 全部资产';
+
+    var range = state.statsRange || 'all';
+    var nowYear = new Date().getFullYear();
+    function inRange(it) {
+      if (range === 'all') return true;
+      var d = parseDate(it.purchaseDate);
+      if (!d) return false;
+      if (range === 'year') return d.getFullYear() === nowYear;
+      return diffDays(it.purchaseDate) <= 365;
+    }
+    var items = scoped.filter(function (x) { return inRange(x.it); });
 
     if (!items.length) {
-      $('#stats-body').innerHTML =
+      var noOutdoor = scope === 'outdoor' && !scoped.length;
+      var msg = noOutdoor ? '还没有计入户外的装备'
+        : (all.length ? '这个范围里没有买入的物品' : '还没有可以分析的资产');
+      var hint = noOutdoor
+        ? '到「我的 → 分类管理」把户外分类点亮，或在物品编辑里单独设置'
+        : (all.length ? '换个时间范围，或切到「全部资产」看看' : '先在「资产」里记下第一件');
+      $('#stats-body').innerHTML = statsHeadHtml() +
         '<div class="st-empty-card"><div class="st-empty-ico">📊</div>' +
-          '<p>还没有可以分析的物品</p>' +
-          '<span>先在「资产」里记下第一件，图表会自动生成</span>' +
+          '<p>' + msg + '</p>' +
+          '<span>' + hint + '</span>' +
         '</div>';
       return;
     }
@@ -2488,7 +2863,7 @@
 
     /* 闲置率：服役超过 30 天，且 180 天内没有使用记录（含从未使用） */
     var idleCandidates = items.filter(function (x) {
-      return x.it.status !== '已退役' && x.c.days > 30;
+      return x.it.status !== '已退役' && x.c.days > 30 && useModeOf(x.it) !== 'daily';
     });
     var idleList = idleCandidates.filter(function (x) {
       var last = lastUsageDate(x.it.id);
@@ -2509,8 +2884,15 @@
       '</div>';
     }).join('');
 
+    function tripInRange(t) {
+      if (range === 'all') return true;
+      var td = parseDate(t.startDate);
+      if (!td) return false;
+      if (range === 'year') return td.getFullYear() === nowYear;
+      return diffDays(t.startDate) <= 365;
+    }
     var tripRows = (DB.trips || []).filter(function (t) {
-      return t && !t.deleted && t.status === '已完成';
+      return t && !t.deleted && t.status === '已完成' && tripInRange(t);
     }).map(function (t) {
       return { t: t, c: tripCost(t) };
     }).filter(function (x) {
@@ -2594,8 +2976,9 @@
     var vsHtml;
     function vsRows(list) {
       return list.map(function (x) {
-        return '<div class="st-vs-row"><span>' + esc(x.it.name) + '</span><b>' +
-          cash(x.c.perUse) + '</b></div>';
+        return '<div class="st-vs-row"><span>' + esc(x.it.name) +
+          (useModeOf(x.it) === 'daily' ? ' <i class="st-mini-tag">日常</i>' : '') +
+          '</span><b>' + cash(x.c.perUse) + '</b></div>';
       }).join('');
     }
     if (pu.length >= 2) {
@@ -2670,10 +3053,61 @@
     var heroMain = dot >= 0 ? totalTxt.slice(0, dot) : totalTxt;
     var heroDec = dot >= 0 ? totalTxt.slice(dot) : '';
 
+    /* 月度支出：今年按月排；全部/近12个月按滚动 12 个月排 */
+    var months = [];
+    var mi;
+    if (range === 'year') {
+      for (mi = 0; mi < 12; mi++) {
+        months.push({ key: nowYear + '-' + pad(mi + 1), label: String(mi + 1), full: (mi + 1) + '月', total: 0 });
+      }
+    } else {
+      var baseM = new Date();
+      for (mi = 11; mi >= 0; mi--) {
+        var md = new Date(baseM.getFullYear(), baseM.getMonth() - mi, 1);
+        months.push({
+          key: md.getFullYear() + '-' + pad(md.getMonth() + 1),
+          label: String(md.getMonth() + 1),
+          full: (md.getMonth() + 1) + '月',
+          total: 0
+        });
+      }
+    }
+    var mIdx = {};
+    months.forEach(function (m, i) { mIdx[m.key] = i; });
+    items.forEach(function (x) {
+      var pd = parseDate(x.it.purchaseDate);
+      if (!pd) return;
+      var key = pd.getFullYear() + '-' + pad(pd.getMonth() + 1);
+      if (mIdx[key] != null) months[mIdx[key]].total += x.c.net;
+    });
+    var mMax = 1, mSum = 0, mTop = months[0];
+    months.forEach(function (m) {
+      if (m.total > mMax) mMax = m.total;
+      if (m.total > mTop.total) mTop = m;
+      mSum += m.total;
+    });
+    var barsHtml = months.map(function (m, i) {
+      var h = m.total ? Math.max(4, Math.round(m.total / mMax * 100)) : 0;
+      return '<div class="st-bar-col" title="' + m.full + ' · ' + money(m.total) + '">' +
+        '<i style="height:' + h + '%"></i>' +
+        '<span>' + m.label + '</span></div>';
+    }).join('');
+    var monthPanel =
+      '<div class="panel st-panel-month">' +
+        '<h3>月度支出</h3><p class="sub">' +
+          (range === 'year' ? '今年每个月的买入金额' : '最近 12 个月的买入金额') +
+          '（已扣二手价值）' + scopeNote + '，横轴为月份</p>' +
+        '<div class="st-bars">' + barsHtml + '</div>' +
+        '<div class="st-bars-foot"><span>最高 ' + cash(mTop.total) + ' · ' + mTop.full + '</span>' +
+          '<span>合计 ' + cash(mSum) + '</span></div>' +
+      '</div>';
+
     $('#stats-body').innerHTML =
+      statsHeadHtml() +
       '<div class="st-hero">' +
         '<div class="st-hero-blob"></div>' +
-        '<div class="st-hero-top"><span>资产总计</span><span class="st-hero-tag">' + count + ' 件</span></div>' +
+        '<div class="st-hero-top"><span>' + (scope === 'outdoor' ? '户外资产总计' : '资产总计') +
+          '</span><span class="st-hero-tag">' + count + ' 件</span></div>' +
         '<div class="st-hero-num">' + '<span class="cur">' + CUR + '</span>' + heroMain + '<small>' + heroDec + '</small></div>' +
         '<div class="st-hero-grid">' +
           '<div><b>' + (dailyKnown ? cash(daily) : '数据不足') + '</b><span>总日均 / 天</span></div>' +
@@ -2681,20 +3115,22 @@
           '<div><b>' + overdue.length + ' 件</b><span>超期物品</span></div>' +
         '</div>' +
       '</div>' +
+      monthPanel +
       '<div class="panel">' +
-        '<h3>分类占比</h3><p class="sub">按金额（已扣二手价值）</p>' +
+        '<h3>分类占比</h3><p class="sub">按金额（已扣二手价值）' + scopeNote + '</p>' +
         '<div class="st-donut-row">' + donutHtml + '<ul class="st-legend">' + legendHtml + '</ul></div>' +
       '</div>' +
       '<div class="panel">' +
-        '<h3>分类明细</h3><p class="sub">金额、件数一眼对比</p>' +
+        '<h3>分类明细</h3><p class="sub">金额、件数一眼对比' + scopeNote + '</p>' +
         '<div class="st-cat-grid">' + catGridHtml + '</div>' +
       '</div>' +
       '<div class="panel st-panel-vs">' +
-        '<h3>单次成本排行</h3><p class="sub">按累计使用次数摊薄 · 越少越划算</p>' +
+        '<h3>单次成本排行</h3><p class="sub">按累计使用次数摊薄 · 越少越划算' + scopeNote + '</p>' +
         vsHtml +
       '</div>' +
       '<div class="panel st-panel-idle">' +
-        '<div class="st-head"><div><h3>闲置率</h3><p class="sub">服役超过 30 天，180 天内没用过</p></div>' +
+        '<div class="st-head"><div><h3>闲置率</h3><p class="sub">服役超过 30 天，180 天内没用过' +
+          (scope === 'outdoor' ? '（仅户外装备）' : '') + '</p></div>' +
           '<span class="st-chip' + (idleRate >= 50 ? ' bad' : '') + '">' + idleRate + '%</span></div>' +
         '<div class="st-idle-hero"><b>' + idleRate + '%</b><span>' +
           idleList.length + ' / ' + idleCandidates.length + ' 件长期闲置</span></div>' +
@@ -2707,7 +3143,7 @@
         (tripRankHtml || '<div class="st-empty">还没有已完成的行程，完成后这里会按花费排名</div>') +
       '</div>' +
       '<div class="panel st-panel-life">' +
-        '<div class="st-head"><div><h3>寿命进度</h3><p class="sub">已持有 / 计划使用年限，超期标红</p></div>' +
+        '<div class="st-head"><div><h3>寿命进度</h3><p class="sub">已持有 / 计划使用年限，超期标红' + scopeNote + '</p></div>' +
           lifeChip + '</div>' +
         lifeHtml +
       '</div>' +
@@ -2805,7 +3241,7 @@
     DB.items.forEach(function (it) {
       if (it.deleted) return;
       var c = it.cat || '其他';
-      counts[c] = (counts[c] || 0) + 1;
+      counts[c] = (counts[c] || 0) + (Number(it.qty) || 1);
     });
     return counts;
   }
@@ -2819,9 +3255,12 @@
     var counts = catCounts();
     var all = allCats();
     $('#cats-list').innerHTML = all.map(function (c) {
+      var out = isOutdoorCat(c);
       return '<div class="cat-row">' +
         '<span class="cat-name">' + esc(c) + '</span>' +
         '<span class="cat-count">' + (counts[c] || 0) + ' 件</span>' +
+        '<button class="cat-outdoor' + (out ? ' on' : '') + '" data-cat-outdoor="' + esc(c) + '" title="是否计入户外分析">' +
+          (out ? '户外' : '非户外') + '</button>' +
         '<button class="cat-act" data-cat-rename="' + esc(c) + '">改名</button>' +
         '<button class="cat-act danger" data-cat-del="' + esc(c) + '">删除</button>' +
       '</div>';
@@ -2854,6 +3293,9 @@
     if (name.length > 8) { toast('分类名最多 8 个字'); return; }
     if (allCats().indexOf(name) >= 0) { toast('已经有这个分类了'); return; }
     CATS.push(name);
+    if (!OUTDOOR_CATS) OUTDOOR_CATS = {};
+    OUTDOOR_CATS[name] = false;
+    saveOutdoorCats();
     input.value = '';
     refreshAfterCats();
     toast('已添加「' + name + '」');
@@ -2871,6 +3313,11 @@
     if (i >= 0) CATS[i] = next;
     else CATS.push(next); /* 历史遗留分类，补进列表 */
     DB.items.forEach(function (it) { if (it.cat === name) it.cat = next; });
+    if (OUTDOOR_CATS && OUTDOOR_CATS[name] != null) {
+      OUTDOOR_CATS[next] = OUTDOOR_CATS[name];
+      delete OUTDOOR_CATS[name];
+      saveOutdoorCats();
+    }
     if (state.cat === name) state.cat = next;
     saveAll();
     refreshAfterCats();
@@ -2890,7 +3337,17 @@
     if (!window.confirm(msg)) return;
 
     CATS = CATS.filter(function (c) { return c !== name; });
-    DB.items.forEach(function (it) { if (it.cat === name) it.cat = fallback; });
+    var wasOutdoor = isOutdoorCat(name);
+    DB.items.forEach(function (it) {
+      if (it.cat !== name) return;
+      it.cat = fallback;
+      // 原来算户外的分类被删掉，移到非户外分类时给物品打上单独的户外标记，避免悄悄掉出分析
+      if (wasOutdoor && !isOutdoorCat(fallback) && it.outdoor == null) it.outdoor = true;
+    });
+    if (OUTDOOR_CATS) {
+      delete OUTDOOR_CATS[name];
+      saveOutdoorCats();
+    }
     if (state.cat === name) state.cat = '全部分类';
     saveAll();
     refreshAfterCats();
@@ -3354,10 +3811,118 @@
   /* =========================================================
      弹层控制
      ========================================================= */
-  function openSheet(sel) { $(sel).classList.add('open'); }
-  function closeSheet(sel) { $(sel).classList.remove('open'); }
+  var GUARDED_SHEETS = {
+    'editor-sheet': '#editor-form',
+    'trip-editor-sheet': '#trip-form',
+    'geditor-sheet': '#geditor-form',
+    'tpl-editor-sheet': '#tpl-form'
+  };
+  var pendingCloseSheet = null;
+
+  function guardFormOf(sheet) {
+    var sel = sheet && GUARDED_SHEETS[sheet.id];
+    return sel ? $(sel) : null;
+  }
+  function isFormDirty(sheet) {
+    var f = guardFormOf(sheet);
+    return !!(f && f.dataset && f.dataset.dirty === '1');
+  }
+  function requestCloseSheet(sheet) {
+    if (!sheet) return;
+    if (isFormDirty(sheet)) {
+      pendingCloseSheet = sheet;
+      openSheet('#discard-sheet');
+      return;
+    }
+    sheet.classList.remove('open');
+  }
+  function openSheet(sel) {
+    var el = $(sel);
+    if (!el) return;
+    var f = guardFormOf(el);
+    if (f) f.dataset.dirty = '';
+    el.classList.add('open');
+  }
+  function closeSheet(sel) {
+    var el = $(sel);
+    if (!el) return;
+    el.classList.remove('open');
+    var f = guardFormOf(el);
+    if (f) f.dataset.dirty = '';
+  }
+
+  /* 新增物品的草稿：防止误关弹层后白填一遍 */
+  var DRAFT_KEY = 'gearLedger.draft.asset';
+  var draftTimer = 0;
+  var DRAFT_FIELDS = ['name', 'purchaseDate', 'price', 'qty', 'extra', 'cat', 'tags',
+    'lifeValue', 'lifeUnit', 'weight', 'officialPrice', 'status', 'notes', 'outdoor',
+    'useMode', 'dailyFrom', 'dailyTo'];
+  function readDraft() {
+    try {
+      var d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+      if (!d || !d.ts || Date.now() - d.ts > 24 * 3600 * 1000) return null;
+      return d;
+    } catch (e) { return null; }
+  }
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+    var bar = $('#editor-draft');
+    if (bar) bar.classList.add('hidden');
+  }
+  function saveDraftNow() {
+    var f = $('#editor-form');
+    if (!f || state.editingId) return;
+    var el = f.elements;
+    var d = { ts: Date.now() };
+    DRAFT_FIELDS.forEach(function (k) {
+      if (!el[k]) return;
+      d[k] = el[k].type === 'checkbox' ? el[k].checked : el[k].value;
+    });
+    if (!String(d.name || '').trim() && !String(d.price || '').trim() && !String(d.notes || '').trim()) return;
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch (e) {}
+  }
+  function scheduleDraftSave() {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraftNow, 500);
+  }
+  function renderDraftBar(d) {
+    var bar = $('#editor-draft');
+    if (!bar) return;
+    bar.classList.toggle('hidden', !d);
+    if (!d) return;
+    var txt = bar.querySelector('.draft-text');
+    if (txt) txt.innerHTML = '发现一份没保存的填写：' + (d.name ? '「' + esc(d.name) + '」' : '上次记录');
+  }
+  function restoreDraft(d) {
+    var f = $('#editor-form');
+    if (!f || !d) return;
+    var el = f.elements;
+    DRAFT_FIELDS.forEach(function (k) {
+      if (!el[k] || d[k] == null) return;
+      if (el[k].type === 'checkbox') el[k].checked = !!d[k];
+      else el[k].value = d[k];
+    });
+    if (d.cat && el.cat.value !== d.cat) {
+      var opt = document.createElement('option');
+      opt.textContent = d.cat;
+      el.cat.appendChild(opt);
+      el.cat.value = d.cat;
+    }
+    f.dataset.dirty = '1';
+    renderDraftBar(null);
+    syncGearCatRow(el.cat.value, false);
+    if (el.useMode && el.useMode.value === 'daily' && el.dailyFrom && !el.dailyFrom.value) {
+      el.dailyFrom.value = el.purchaseDate.value || todayStr();
+    }
+    syncDailyRows();
+    updateCostPreview();
+    toast('已恢复上次填写');
+  }
 
   function switchTab(name) {
+    var prevView = $('#view-' + state.tab);
+    var prevSb = prevView ? prevView.querySelector('.scroll-body') : null;
+    if (prevSb && state.tab !== name) state.scrollPos[state.tab] = prevSb.scrollTop;
     state.assetSorting = false;
     state.gearSorting = false;
     state.tab = name;
@@ -3371,7 +3936,7 @@
     if (name === 'assets') renderAssets();
     if (name === 'mine') renderMine();
     var sb = view ? view.querySelector('.scroll-body') : null;
-    if (sb) sb.scrollTop = 0;
+    if (sb) sb.scrollTop = state.scrollPos[name] || 0;
     window.scrollTo(0, 0);
   }
 
@@ -3452,6 +4017,32 @@
     });
   }
 
+  function providerName() {
+    var p = (window.Cloud && Cloud.provider) ? Cloud.provider() : '';
+    if (p === 'gist') return 'GitHub Gist（私有）';
+    if (p === 'cloudbase') return '腾讯云开发';
+    return '未配置';
+  }
+  function renderSyncSheet() {
+    var body = $('#sync-body');
+    if (!body) return;
+    var st = window.Cloud ? Cloud.status() : 'off';
+    var err = (window.Cloud && Cloud.lastError) ? Cloud.lastError() : '';
+    var last = getLastSync();
+    var stateTxt = st === 'syncing' ? '正在同步…'
+      : (st === 'ok' ? '已同步'
+      : (st === 'error' ? '上次同步失败'
+      : (cloudConnected ? '等待同步' : '未连接')));
+    body.innerHTML =
+      '<div class="sync-card">' +
+        '<div class="sync-row"><span>当前状态</span><b class="' + (st === 'error' ? 'bad' : '') + '">' + stateTxt + '</b></div>' +
+        '<div class="sync-row"><span>上次成功</span><b>' + (last ? fmtSyncTime(last) : '还没有成功同步过') + '</b></div>' +
+        '<div class="sync-row"><span>同步方式</span><b>' + providerName() + '</b></div>' +
+      '</div>' +
+      (st === 'error' && err ? '<p class="sync-err">' + esc(err) + '</p>' : '') +
+      '<p class="sync-tip">数据只存在你自己的账号里。换设备后先登录，会自动把两边的记录合并。</p>';
+  }
+
   function setupCloud() {
     var syncBtn = $('#btn-sync');
     var syncText = $('#sync-text');
@@ -3493,6 +4084,8 @@
         syncBtn.title = title;
         syncBtn.classList.toggle('syncing', s === 'syncing');
       }
+      var syncSheet = $('#sync-sheet');
+      if (syncSheet && syncSheet.classList.contains('open')) renderSyncSheet();
     });
 
     // Gist 模式：把登录框改造成 Token 输入框
@@ -3605,7 +4198,8 @@
           hasExpiry: (Number(cols[6]) || 0) > 0,
           status: ['服役中', '预备役', '已退役'].indexOf(cols[8]) >= 0 ? cols[8] : '服役中',
           subtractResale: false, resale: 0,
-          trackPerUse: Number(cols[9]) > 0,
+          useMode: (Number(cols[9]) || 0) > 0 ? (isOutdoorCat(cName) ? 'trip' : 'manual') : 'none',
+          trackPerUse: (Number(cols[9]) || 0) > 0,
           baseCount: Number(cols[9]) || 0,
           useLog: [],
           notes: cols[10] || '',
@@ -4414,7 +5008,7 @@
     var rec = (DB.usage || []).find(function (u) {
       return !u.deleted && u.tripId === g.tripId && u.assetId === g.assetId;
     });
-    if (rec && !window.confirm('这件装备已经生成本次使用记录，移除会一并撤销。继续吗？')) return;
+    var prevUse = !!g.actualUse;
     var now = Date.now();
     if (rec) { rec.deleted = true; rec.updatedAt = now; }
     g.deleted = true;
@@ -4424,7 +5018,20 @@
     renderTripDetail();
     renderTrips();
     renderStats();
-    toast('已从清单移除');
+    toast('已从清单移除', {
+      action: '撤销',
+      onAction: function () {
+        g.deleted = false;
+        g.actualUse = prevUse;
+        g.updatedAt = Date.now();
+        if (rec) { rec.deleted = false; rec.updatedAt = Date.now(); }
+        saveAll();
+        renderTripDetail();
+        renderTrips();
+        renderStats();
+        toast('已恢复这件装备');
+      }
+    });
   }
 
   function openTripConfirm(id) {
@@ -4443,6 +5050,13 @@
       var name = it ? it.name : (g.assetName || '已删除的资产');
       var carry = g.actualCarry == null ? !!g.planned : !!g.actualCarry;
       var use = !!g.actualUse;
+      var mode = it ? useModeOf(it) : 'manual';
+      var incHtml = mode === 'daily'
+        ? '<span class="confirm-note">按天折算</span>'
+        : (mode === 'none'
+          ? '<span class="confirm-note">不统计</span>'
+          : '<label class="confirm-inc">次数 <input type="number" min="1" step="1" inputmode="numeric" data-confirm-inc="' +
+            g.id + '" value="' + (g.useIncrement || 1) + '"></label>');
       return '<div class="confirm-row">' +
         '<div class="confirm-main"><b>' + esc(name) + '</b><small>' + esc(g.source) +
           (g.planned ? ' · 计划携带' : ' · 未计划') + '</small></div>' +
@@ -4451,8 +5065,7 @@
             (carry ? ' checked' : '') + '> 携带</label>' +
           '<label class="confirm-check"><input type="checkbox" data-confirm-use="' + g.id + '"' +
             (use ? ' checked' : '') + '> 使用</label>' +
-          '<label class="confirm-inc">次数 <input type="number" min="1" step="1" inputmode="numeric" data-confirm-inc="' +
-            g.id + '" value="' + (g.useIncrement || 1) + '"></label>' +
+          incHtml +
         '</div>' +
       '</div>';
     }).join('') : '<div class="trip-empty-inline">这个行程还没有装备，直接确认也可以完成。</div>';
@@ -4480,32 +5093,35 @@
         return u && u.tripId === t.id && u.assetId === g.assetId;
       });
       var rec = matches.find(function (u) { return !u.deleted; }) || matches[0] || null;
-      if (use) {
-        var asset = assetById(g.assetId);
-        if (!rec) {
-          rec = {
-            id: uid(), assetId: g.assetId, assetName: asset ? asset.name : (g.assetName || ''),
-            tripId: t.id, date: t.endDate || todayStr(), count: inc,
-            source: '行程生成', notes: '', updatedAt: now, deleted: false
-          };
-          DB.usage.push(rec);
-        } else {
-          rec.deleted = false;
-          rec.assetName = asset ? asset.name : (g.assetName || rec.assetName || '');
-          rec.date = t.endDate || rec.date || todayStr();
-          rec.count = inc;
-          rec.source = '行程生成';
-          rec.notes = '';
-          rec.updatedAt = now;
-        }
-        matches.forEach(function (u) {
-          if (u !== rec && !u.deleted) { u.deleted = true; u.updatedAt = now; }
-        });
-      } else {
+      if (!use) {
         matches.forEach(function (u) {
           if (!u.deleted) { u.deleted = true; u.updatedAt = now; }
         });
+        return;
       }
+      var asset = assetById(g.assetId);
+      var mode = asset ? useModeOf(asset) : 'manual';
+      /* 常用按天折算、不统计的资产不在行程里计次 */
+      if (mode === 'daily' || mode === 'none') return;
+      if (!rec) {
+        rec = {
+          id: uid(), assetId: g.assetId, assetName: asset ? asset.name : (g.assetName || ''),
+          tripId: t.id, date: t.endDate || todayStr(), count: inc,
+          source: '行程生成', notes: '', updatedAt: now, deleted: false
+        };
+        DB.usage.push(rec);
+      } else {
+        rec.deleted = false;
+        rec.assetName = asset ? asset.name : (g.assetName || rec.assetName || '');
+        rec.date = t.endDate || rec.date || todayStr();
+        rec.count = inc;
+        rec.source = '行程生成';
+        rec.notes = '';
+        rec.updatedAt = now;
+      }
+      matches.forEach(function (u) {
+        if (u !== rec && !u.deleted) { u.deleted = true; u.updatedAt = now; }
+      });
     });
     t.status = '已完成';
     t.updatedAt = now;
@@ -4521,6 +5137,8 @@
   function openManualUsage(assetId) {
     var it = assetById(assetId);
     if (!it) return;
+    var mode = useModeOf(it);
+    if (mode !== 'trip' && mode !== 'manual') { toast('这件物品不按次统计'); return; }
     state.usageAssetId = assetId;
     var f = $('#usage-form');
     if (!f) return;
@@ -4535,6 +5153,8 @@
     e.preventDefault();
     var it = assetById(state.usageAssetId);
     if (!it) return;
+    var mode = useModeOf(it);
+    if (mode !== 'trip' && mode !== 'manual') { toast('这件物品不按次统计'); return; }
     var f = $('#usage-form');
     var d = f.elements.date.value;
     var count = Math.max(1, Math.floor(num(f.elements.count.value)));
@@ -4553,30 +5173,94 @@
     toast('已补录使用记录');
   }
 
+  function quickUse(assetId) {
+    var it = assetById(assetId);
+    if (!it) return;
+    if (useModeOf(it) !== 'manual') { toast('这件物品不使用手动计数'); return; }
+    var rec = {
+      id: uid(), assetId: it.id, assetName: it.name, tripId: null,
+      date: todayStr(), count: 1, source: '手动补录', notes: '',
+      updatedAt: Date.now(), deleted: false
+    };
+    DB.usage.push(rec);
+    saveAll();
+    renderAssets();
+    renderStats();
+    if ($('#detail-sheet').classList.contains('open')) openDetail(it.id);
+    toast('已记 1 次使用 · ' + it.name, {
+      action: '撤销',
+      onAction: function () {
+        rec.deleted = true;
+        rec.updatedAt = Date.now();
+        saveAll();
+        renderAssets();
+        renderStats();
+        if ($('#detail-sheet').classList.contains('open')) openDetail(it.id);
+        toast('已撤销这次使用');
+      }
+    });
+  }
+
   function deleteUsageRecord(id) {
     var u = (DB.usage || []).find(function (x) { return x.id === id && !x.deleted; });
     if (!u) return;
-    if (!window.confirm('撤销这条使用记录？资产累计次数会同步减少。')) return;
     var now = Date.now();
-    u.deleted = true;
-    u.updatedAt = now;
+    var gearSnaps = [];
     if (u.tripId) {
       tripGearOf(u.tripId).forEach(function (g) {
-        if (g.assetId === u.assetId) { g.actualUse = false; g.updatedAt = now; }
+        if (g.assetId !== u.assetId) return;
+        gearSnaps.push({ g: g, actualUse: !!g.actualUse });
+        g.actualUse = false;
+        g.updatedAt = now;
       });
     }
+    u.deleted = true;
+    u.updatedAt = now;
     saveAll();
-    if ($('#detail-sheet').classList.contains('open')) openDetail(u.assetId);
+    refreshUsageViews(u.assetId);
+    toast('已撤销这条使用记录', {
+      action: '恢复',
+      onAction: function () {
+        var ts = Date.now();
+        u.deleted = false;
+        u.updatedAt = ts;
+        gearSnaps.forEach(function (s) {
+          s.g.actualUse = s.actualUse;
+          s.g.updatedAt = ts;
+        });
+        saveAll();
+        refreshUsageViews(u.assetId);
+        toast('已恢复这条记录');
+      }
+    });
+  }
+
+  /* 撤销/恢复使用记录后，把所有可能显示它的地方刷新一遍 */
+  function refreshUsageViews(assetId) {
+    if ($('#detail-sheet').classList.contains('open')) openDetail(assetId);
     if ($('#trip-sheet').classList.contains('open')) renderTripDetail();
     if ($('#trip-confirm-sheet').classList.contains('open')) renderTripConfirm();
+    renderUsage();
     renderTrips();
     renderStats();
-    toast('已撤销，使用次数已回滚');
+    renderAssets();
   }
 
   /* 台账里已经有你自己的真实记录了吗？有的话示例数据就该退场 */
   function hasRealData() {
     return (DB.items || []).some(function (x) { return x && !x.demo && !x.deleted; });
+  }
+
+  /* 使用记录的基础集合：排除删除、示例、资产已删除的记录 */
+  function usageBaseList() {
+    var realMode = hasRealData();
+    return (DB.usage || []).filter(function (u) {
+      if (!u || u.deleted) return false;
+      var owner = u.assetId ? assetById(u.assetId) : null;
+      if (realMode && (u.demo || (owner && owner.demo))) return false;
+      if (u.assetId && (!owner || owner.deleted)) return false;
+      return true;
+    });
   }
 
   function renderUsage() {
@@ -4589,17 +5273,27 @@
     var chipsBox = $('#usage-chips');
     if (chipsBox) chipsBox.innerHTML = chips;
 
+    var scope = state.usageScope === 'all' ? 'all' : 'outdoor';
+    var base = usageBaseList();
+    var outN = base.filter(function (u) {
+      var owner = u.assetId ? assetById(u.assetId) : null;
+      return owner && isOutdoorItem(owner);
+    }).length;
+    var scopeBox = $('#usage-scope');
+    if (scopeBox) {
+      scopeBox.innerHTML =
+        '<button class="usage-scope-btn' + (scope === 'outdoor' ? ' on' : '') +
+          '" data-usage-scope="outdoor">户外装备 <b>' + outN + '</b> 条</button>' +
+        '<button class="usage-scope-btn' + (scope === 'all' ? ' on' : '') +
+          '" data-usage-scope="all">全部记录 <b>' + base.length + '</b> 条</button>';
+    }
+
     var q = state.usageQ.trim().toLowerCase();
     var now = new Date();
     var year = now.getFullYear();
-    var realMode = hasRealData();
-    var list = (DB.usage || []).filter(function (u) {
-      if (!u || u.deleted) return false;
+    var list = base.filter(function (u) {
       var owner = u.assetId ? assetById(u.assetId) : null;
-      /* 有真实物品时，示例数据带出来的使用记录不再展示（它们不上云，也不属于你的账目） */
-      if (realMode && (u.demo || (owner && owner.demo))) return false;
-      /* 关联的资产已经不在了（示例物品被清掉后留下的老记录），也不展示 */
-      if (u.assetId && (!owner || owner.deleted)) return false;
+      if (scope === 'outdoor' && (!owner || !isOutdoorItem(owner))) return false;
       if (state.usageRange === '30' && diffDays(u.date) > 30) return false;
       if (state.usageRange === 'year' && parseDate(u.date) && parseDate(u.date).getFullYear() !== year) return false;
       if (!q) return true;
@@ -4619,26 +5313,45 @@
         var name = it ? it.name : (u.assetName || '已删除的资产');
         var trip = u.tripId ? (DB.trips || []).find(function (t) { return t.id === u.tripId; }) : null;
         var source = u.source || '手动补录';
+        var nonOutdoor = scope === 'all' && !(it && isOutdoorItem(it));
         return '<div class="usage-row">' +
           '<div class="usage-date"><b>' + (u.date ? u.date.slice(5) : '—') + '</b><small>' +
             (u.date ? u.date.slice(0, 4) : '') + '</small></div>' +
           '<div class="usage-main"><b>' + esc(name) + '</b>' +
             '<small>' + esc(source) + (trip ? ' · ' + esc(trip.name) : '') +
-            (u.notes ? ' · ' + esc(u.notes) : '') + '</small></div>' +
+            (u.notes ? ' · ' + esc(u.notes) : '') +
+            (nonOutdoor ? ' · 非户外' : '') + '</small></div>' +
           '<div class="usage-count">×' + (u.count || 1) + '</div>' +
+          '<button class="usage-del" type="button" data-usage-del="' + u.id + '">撤销</button>' +
           (trip ? '<button class="usage-jump" data-usage-jump="' + trip.id + '" title="查看行程">›</button>' : '') +
         '</div>';
       }).join('');
     }
     var empty = $('#usage-empty');
     if (empty) {
+      var filtered = q || state.usageRange !== 'all';
+      var title = filtered ? '没有匹配的使用记录'
+        : (scope === 'outdoor' ? '还没有户外使用记录' : '还没有使用记录');
+      var hint = filtered ? '换个关键词或时间范围'
+        : (scope === 'outdoor'
+          ? '完成一次行程，或在户外装备详情里补录；也可以切到「全部记录」'
+          : '完成一次行程，或在资产详情里补录');
       empty.classList.toggle('hidden', list.length > 0);
-      empty.innerHTML = '<div class="empty-ico">🧾</div><p>' +
-        (q || state.usageRange !== 'all' ? '没有匹配的使用记录' : '还没有使用记录') + '</p>' +
-        '<span>' + (q || state.usageRange !== 'all' ? '换个关键词或时间范围' : '完成一次行程，或在资产详情里补录') + '</span>';
+      empty.innerHTML = '<div class="empty-ico">🧾</div><p>' + title + '</p><span>' + hint + '</span>';
     }
     var sum = $('#usage-summary');
-    if (sum) sum.textContent = list.length + ' 条记录 · 共 ' + totalCount + ' 次使用';
+    if (sum) {
+      sum.textContent = (scope === 'all' ? '全部记录' : '户外装备') + '：' + list.length +
+        ' 条 · 共 ' + totalCount + ' 次使用';
+    }
+    var dailyCount = (DB.items || []).filter(function (x) {
+      return x && !x.deleted && useModeOf(x) === 'daily';
+    }).length;
+    var foot = $('#usage-foot');
+    if (foot) {
+      foot.classList.toggle('hidden', !dailyCount);
+      foot.textContent = dailyCount ? '另有 ' + dailyCount + ' 件常用设备按天折算，折算天数不在这里显示。' : '';
+    }
   }
 
   /* ---------- 打包模板 ---------- */
@@ -4811,6 +5524,7 @@
     state.pickerTripId = tripId || null;
     state.pickerSelected = {};
     state.pickerQ = '';
+    state.pickerScope = 'outdoor';
     $('#picker-title').textContent = mode === 'trip' ? '添加装备' : '选择资产';
     $('#picker-q').value = '';
     renderPicker();
@@ -4821,12 +5535,22 @@
     var box = $('#picker-list');
     if (!box) return;
     var q = state.pickerQ.trim().toLowerCase();
+    var scope = state.pickerScope === 'all' ? 'all' : 'outdoor';
     var exclude = {};
     if (state.pickerMode === 'trip' && state.pickerTripId) {
       tripGearOf(state.pickerTripId).forEach(function (g) { exclude[g.assetId] = true; });
     }
-    var list = (DB.items || []).filter(function (it) {
-      if (!it || it.deleted || exclude[it.id]) return false;
+    var active = (DB.items || []).filter(function (it) { return it && !it.deleted; });
+    var outN = active.filter(function (it) { return isOutdoorItem(it); }).length;
+    var scopeBox = $('#picker-scope');
+    if (scopeBox) {
+      scopeBox.innerHTML =
+        '<button class="chip' + (scope !== 'all' ? ' on' : '') + '" data-picker-scope="outdoor">只看户外 ' + outN + '</button>' +
+        '<button class="chip' + (scope === 'all' ? ' on' : '') + '" data-picker-scope="all">全部资产 ' + active.length + '</button>';
+    }
+    var list = active.filter(function (it) {
+      if (exclude[it.id]) return false;
+      if (scope !== 'all' && !isOutdoorItem(it)) return false;
       if (!q) return true;
       return (it.name + ' ' + (it.cat || '') + ' ' + (it.gearCat || '')).toLowerCase().indexOf(q) >= 0;
     }).sort(function (a, b) {
@@ -4834,14 +5558,17 @@
     });
     box.innerHTML = list.length ? list.map(function (it) {
       var on = !!state.pickerSelected[it.id];
+      var outdoor = isOutdoorItem(it);
       return '<button class="picker-row ' + (on ? 'on' : '') + '" data-picker-pick="' + it.id + '">' +
         '<span class="picker-ico" style="background:' + iconBg(it.cat) + '">' +
           iconMarkup(it.iconImg || it.icon) + '</span>' +
         '<span class="picker-main"><b>' + esc(it.name) + '</b><small>' + esc(it.cat || '') +
+          (outdoor ? '' : ' · 非户外') +
           (assetWeightOf(it) ? ' · ' + fmtWeight(assetWeightOf(it)) : '') + '</small></span>' +
         '<span class="picker-check">' + (on ? '✓' : '') + '</span>' +
       '</button>';
-    }).join('') : '<div class="trip-empty-inline">没有可添加的资产</div>';
+    }).join('') : '<div class="trip-empty-inline">' +
+      (scope === 'outdoor' ? '没有匹配的户外装备，试试「全部资产」' : '没有可添加的资产') + '</div>';
     var n = Object.keys(state.pickerSelected).length;
     var btn = $('#picker-add');
     if (btn) btn.textContent = (state.pickerMode === 'trip' ? '加入清单' : '加入模板') + (n ? '（' + n + '）' : '');
@@ -4860,9 +5587,12 @@
     if (state.pickerMode === 'trip') {
       var t = tripById(state.pickerTripId);
       if (!t) return;
+      var added = 0, extra = 0;
       ids.forEach(function (id) {
         var it = assetById(id);
         if (!it || tripGearFor(t.id, id)) return;
+        added++;
+        if (!isOutdoorItem(it)) extra++;
         DB.tripGear.push({
           id: uid(), tripId: t.id, assetId: it.id, assetName: it.name,
           source: '手动添加', planned: true, actualCarry: null, actualUse: null,
@@ -4874,7 +5604,7 @@
       closeSheet('#picker-sheet');
       renderTripDetail();
       renderTrips();
-      toast('已加入 ' + ids.length + ' 件装备');
+      toast('已加入 ' + added + ' 件装备' + (extra ? '，' + extra + ' 件不计入户外分析' : ''));
       return;
     }
     ids.forEach(function (id) {
@@ -4898,7 +5628,6 @@
     state.tripDeleteId = id;
     var n = usageForTrip(id).length;
     if (!n) {
-      if (!window.confirm('删除行程「' + t.name + '」？')) return;
       softDeleteTrip(id);
       return;
     }
@@ -4906,45 +5635,86 @@
     openSheet('#trip-delete-sheet');
   }
 
-  function softDeleteTrip(id) {
+  function softDeleteTrip(id, opts) {
+    opts = opts || {};
     var t = tripById(id);
     if (!t) return;
     var now = Date.now();
+    var gearSnap = tripGearOf(id).map(function (g) {
+      return { g: g, wasDeleted: !!g.deleted, actualUse: !!g.actualUse };
+    });
     t.deleted = true;
     t.updatedAt = now;
-    tripGearOf(id).forEach(function (g) {
-      g.deleted = true;
-      g.updatedAt = now;
-    });
+    gearSnap.forEach(function (x) { x.g.deleted = true; x.g.updatedAt = now; });
     saveAll();
     closeSheet('#trip-delete-sheet');
     closeSheet('#trip-sheet');
     closeSheet('#trip-confirm-sheet');
     renderTrips();
     renderStats();
-    toast('行程已删除');
+    toast(opts.msg || '行程已删除', {
+      action: '撤销',
+      onAction: function () {
+        var ts = Date.now();
+        t.deleted = false;
+        t.updatedAt = ts;
+        gearSnap.forEach(function (x) {
+          x.g.deleted = x.wasDeleted;
+          x.g.actualUse = x.actualUse;
+          x.g.updatedAt = ts;
+        });
+        if (opts.undo) opts.undo(ts);
+        saveAll();
+        renderTrips();
+        renderStats();
+        toast('已恢复行程');
+      }
+    });
   }
 
   function keepUsageAndDeleteTrip(id) {
     var t = tripById(id);
     if (!t) return;
     var now = Date.now();
+    var snaps = [];
     (DB.usage || []).forEach(function (u) {
       if (!u || u.deleted || u.tripId !== id) return;
+      snaps.push({ u: u, tripId: u.tripId, source: u.source, notes: u.notes });
       u.tripId = null;
       u.source = '手动补录';
       var extra = (u.notes && u.notes !== ('行程：' + t.name)) ? ' · ' + u.notes : '';
       u.notes = '原行程：' + t.name + extra;
       u.updatedAt = now;
     });
-    softDeleteTrip(id);
-    toast('行程已删除，使用记录已保留');
+    softDeleteTrip(id, {
+      msg: '行程已删除，使用记录已保留',
+      undo: function (ts) {
+        snaps.forEach(function (s) {
+          s.u.tripId = s.tripId;
+          s.u.source = s.source;
+          s.u.notes = s.notes;
+          s.u.updatedAt = ts;
+        });
+      }
+    });
   }
 
   function rollbackAndDeleteTrip(id) {
+    var recs = (DB.usage || []).filter(function (u) {
+      return u && !u.deleted && u.tripId === id;
+    });
+    var snaps = recs.map(function (u) { return { u: u, deleted: !!u.deleted }; });
+    var gearSnaps = tripGearOf(id).map(function (g) {
+      return { g: g, actualUse: !!g.actualUse };
+    });
     rollbackTripUsage(id);
-    softDeleteTrip(id);
-    toast('行程已删除，使用记录已回滚');
+    softDeleteTrip(id, {
+      msg: '行程已删除，使用记录已回滚',
+      undo: function (ts) {
+        snaps.forEach(function (s) { s.u.deleted = s.deleted; s.u.updatedAt = ts; });
+        gearSnaps.forEach(function (s) { s.g.actualUse = s.actualUse; s.g.updatedAt = ts; });
+      }
+    });
   }
 
   /* =========================================================
@@ -4960,10 +5730,10 @@
           (state.gearSorting && el.closest('#gear-grid'))) return;
     }
 
-    // 关闭弹层
+    // 关闭弹层（长表单先检查有没有未保存的改动）
     if (el.closest('[data-close]')) {
       var sheet = el.closest('.sheet');
-      if (sheet) sheet.classList.remove('open');
+      if (sheet) requestCloseSheet(sheet);
       return;
     }
     if (el.closest('[data-menu-close]')) {
@@ -4975,6 +5745,13 @@
       $('#demo-tip').classList.add('hidden');
       return;
     }
+    if (el.closest('#firstrun-close')) {
+      try { localStorage.setItem(FIRST_RUN_KEY, '1'); } catch (e) {}
+      $('#firstrun').classList.add('hidden');
+      return;
+    }
+    if (el.closest('#firstrun-add')) { openEditor(null, null); return; }
+    if (el.closest('#firstrun-trips')) { switchTab('trips'); return; }
 
     // 底部导航
     var tab = el.closest('[data-tab]');
@@ -5011,7 +5788,25 @@
       state.q = '';
       var resetQ = $('#q');
       if (resetQ) resetQ.value = '';
+      syncQClear();
       renderAssets();
+      return;
+    }
+
+    // 分析页范围：户外 / 全部
+    var sscope = el.closest('[data-stats-scope]');
+    if (sscope) {
+      state.statsScope = sscope.getAttribute('data-stats-scope') === 'all' ? 'all' : 'outdoor';
+      try { localStorage.setItem(LS_STATS_SCOPE, state.statsScope); } catch (e) {}
+      renderStats();
+      return;
+    }
+
+    // 分析页时间范围
+    var srange = el.closest('[data-stats-range]');
+    if (srange) {
+      state.statsRange = srange.getAttribute('data-stats-range');
+      renderStats();
       return;
     }
 
@@ -5075,9 +5870,28 @@
       return;
     }
 
+    // 列表里快捷记一次使用（要先于卡片打开判断）
+    var quick = el.closest('[data-quick-use]');
+    if (quick) {
+      quickUse(quick.getAttribute('data-quick-use'));
+      return;
+    }
+
     // 资产卡片
     var asset = el.closest('.asset, .acard, .aitem');
     if (asset) { openDetail(asset.getAttribute('data-id')); return; }
+
+    // 详情页：展开 / 收起全部明细
+    var dtog = el.closest('#detail-toggle');
+    if (dtog) {
+      var dmore = $('#detail-more');
+      if (dmore) {
+        var showMore = dmore.classList.contains('hidden');
+        dmore.classList.toggle('hidden', !showMore);
+        dtog.setAttribute('aria-expanded', showMore ? 'true' : 'false');
+      }
+      return;
+    }
 
     // 收藏（必须先于卡片打开判断）
     var fav = el.closest('[data-fav]');
@@ -5160,6 +5974,13 @@
     if (usageJump) {
       ev.stopPropagation();
       openTrip(usageJump.getAttribute('data-usage-jump'));
+      return;
+    }
+    var usageScope = el.closest('[data-usage-scope]');
+    if (usageScope) {
+      state.usageScope = usageScope.getAttribute('data-usage-scope') === 'all' ? 'all' : 'outdoor';
+      try { localStorage.setItem(LS_USAGE_SCOPE, state.usageScope); } catch (e) {}
+      renderUsage();
       return;
     }
     var usageRange = el.closest('[data-usage-range]');
@@ -5258,6 +6079,12 @@
     if (el.closest('#tpl-del')) { deleteTemplate(state.tplEditingId); return; }
 
     // 资产选择器
+    var pscope = el.closest('[data-picker-scope]');
+    if (pscope) {
+      state.pickerScope = pscope.getAttribute('data-picker-scope') === 'all' ? 'all' : 'outdoor';
+      renderPicker();
+      return;
+    }
     var pick = el.closest('[data-picker-pick]');
     if (pick) { togglePicker(pick.getAttribute('data-picker-pick')); return; }
     if (el.closest('#picker-add')) { addPicked(); return; }
@@ -5265,6 +6092,18 @@
     // 我的：分类管理
     if (el.closest('#mine-cats')) { openCats(); return; }
     if (el.closest('#cat-add')) { addCat(); return; }
+    var catOut = el.closest('[data-cat-outdoor]');
+    if (catOut) {
+      var ocName = catOut.getAttribute('data-cat-outdoor');
+      if (!OUTDOOR_CATS) OUTDOOR_CATS = {};
+      OUTDOOR_CATS[ocName] = !isOutdoorCat(ocName);
+      saveOutdoorCats();
+      renderCatsList();
+      renderStats();
+      renderAssets();
+      toast(OUTDOOR_CATS[ocName] ? '「' + ocName + '」已计入户外' : '「' + ocName + '」不再计入户外');
+      return;
+    }
     var catRen = el.closest('[data-cat-rename]');
     if (catRen) { renameCat(catRen.getAttribute('data-cat-rename')); return; }
     var catDel = el.closest('[data-cat-del]');
@@ -5415,23 +6254,32 @@
     if (el.closest('#gphoto-camera')) { pickPhoto('gear', true); return; }
     if (el.closest('#gphoto-remove')) { state.gearFormPhoto = null; renderFormPhoto('gear'); return; }
 
-    // 搜索开合
+    // 搜索：常驻搜索条，🔍 只负责聚焦
     if (el.closest('#btn-search')) {
-      $('#searchbox').classList.toggle('hidden');
-      if (!$('#searchbox').classList.contains('hidden')) $('#q').focus();
+      $('#q').focus();
       return;
     }
     if (el.closest('#btn-q-clear')) {
-      $('#q').value = ''; state.q = '';
-      $('#searchbox').classList.add('hidden');
+      $('#q').value = '';
+      state.q = '';
+      syncQClear();
       renderAssets();
+      $('#q').focus();
       return;
     }
   });
 
-  // 顶部同步刷新 / 齿轮
+  // 顶部同步：点开看状态和失败原因，再决定要不要重试
   var btnSync = $('#btn-sync');
-  if (btnSync) btnSync.addEventListener('click', function () { doSync(true); });
+  if (btnSync) btnSync.addEventListener('click', function () {
+    renderSyncSheet();
+    openSheet('#sync-sheet');
+  });
+  var syncRetry = $('#sync-retry');
+  if (syncRetry) syncRetry.addEventListener('click', function () {
+    doSync(true);
+    renderSyncSheet();
+  });
   $('#btn-more').addEventListener('click', openMenu);
 
   // 资产筛选
@@ -5490,18 +6338,25 @@
   $('#btn-del').addEventListener('click', function () {
     var it = DB.items.find(function (x) { return x.id === state.detailId; });
     if (!it) return;
-    var linkedGear = it.catalogId
-      ? DB.gear.find(function (g) { return g.id === it.catalogId && !g.deleted; })
+    var prevGearId = it.catalogId || null;
+    var linkedGear = prevGearId
+      ? DB.gear.find(function (g) { return g.id === prevGearId && !g.deleted; })
       : null;
-    var msg = linkedGear
-      ? '删除并解绑「' + it.name + '」？\n装备库里的资料卡会保留。'
-      : '删除「' + it.name + '」？';
-    if (!confirm(msg)) return;
     it.deleted = true;
     it.catalogId = null;
     it.updatedAt = Date.now();
-    saveAll(); closeSheet('#detail-sheet'); renderAssets(); renderGear();
-    toast(linkedGear ? '已删除并解绑，装备库资料卡保留' : '已删除');
+    saveAll(); closeSheet('#detail-sheet'); renderAssets(); renderGear(); renderStats();
+    toast(linkedGear ? '已删除并解绑，装备库资料卡保留' : '已删除', {
+      action: '撤销',
+      onAction: function () {
+        it.deleted = false;
+        it.catalogId = prevGearId;
+        it.updatedAt = Date.now();
+        saveAll();
+        renderAssets(); renderGear(); renderStats();
+        toast('已恢复');
+      }
+    });
   });
 
   // 表单
@@ -5509,6 +6364,75 @@
   $('#trip-form').addEventListener('submit', saveTripEditor);
   $('#usage-form').addEventListener('submit', saveManualUsage);
   $('#tpl-form').addEventListener('submit', saveTemplateEditor);
+
+  // 长表单：有改动时，关闭前先确认
+  Object.keys(GUARDED_SHEETS).forEach(function (sid) {
+    var gf = $(GUARDED_SHEETS[sid]);
+    if (!gf) return;
+    gf.addEventListener('input', function () { gf.dataset.dirty = '1'; });
+    gf.addEventListener('change', function () { gf.dataset.dirty = '1'; });
+  });
+  $('#editor-form').addEventListener('input', scheduleDraftSave);
+  $('#editor-form').addEventListener('change', scheduleDraftSave);
+  $('#editor-form').addEventListener('input', updateCostPreview);
+  $('#editor-form').addEventListener('change', updateCostPreview);
+  $('#editor-more-toggle').addEventListener('click', function () {
+    var box = $('#editor-more');
+    if (!box) return;
+    var willOpen = box.classList.contains('hidden');
+    box.classList.toggle('hidden', !willOpen);
+    this.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  });
+  $('#editor-useMode').addEventListener('change', function () {
+    if (this.value === 'daily') {
+      var fromEl = $('#editor-dailyFrom');
+      if (fromEl && !fromEl.value) fromEl.value = $('#editor-form').elements.purchaseDate.value || todayStr();
+    }
+    syncDailyRows();
+  });
+  $('#editor-form').elements.purchaseDate.addEventListener('change', function () {
+    var fromEl = $('#editor-dailyFrom');
+    var modeEl = $('#editor-useMode');
+    if (fromEl && modeEl && modeEl.value === 'daily' && !fromEl.value) fromEl.value = this.value;
+  });
+  $('#draft-restore').addEventListener('click', function () { restoreDraft(readDraft()); });
+  $('#draft-ignore').addEventListener('click', function () {
+    clearDraft();
+    toast('已忽略上次草稿');
+  });
+  $('#discard-close').addEventListener('click', function () {
+    closeSheet('#discard-sheet');
+    pendingCloseSheet = null;
+  });
+  $('#discard-lose').addEventListener('click', function () {
+    var sheet = pendingCloseSheet;
+    closeSheet('#discard-sheet');
+    pendingCloseSheet = null;
+    if (!sheet) return;
+    if (sheet.id === 'editor-sheet' && !state.editingId) clearDraft();
+    var f = guardFormOf(sheet);
+    if (f) f.dataset.dirty = '';
+    sheet.classList.remove('open');
+  });
+  $('#discard-save').addEventListener('click', function () {
+    var sheet = pendingCloseSheet;
+    var form = guardFormOf(sheet);
+    closeSheet('#discard-sheet');
+    pendingCloseSheet = null;
+    if (!form) {
+      if (sheet) sheet.classList.remove('open');
+      return;
+    }
+    if (form.reportValidity && !form.reportValidity()) {
+      toast('请先补全必填项');
+      return;
+    }
+    if (form.requestSubmit) form.requestSubmit();
+    else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  });
+  $('#toast').addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('.toast-act')) runToastAction();
+  });
   $('#trip-type').addEventListener('change', function () {
     renderTripTemplateHint(!state.tripEditingId);
   });
@@ -5524,6 +6448,7 @@
   // 搜索
   $('#q').addEventListener('input', function (e) {
     state.q = e.target.value;
+    syncQClear();
     renderAssets();
   });
   $('#gq').addEventListener('input', function (e) {
@@ -5531,11 +6456,11 @@
     renderGear();
   });
 
-  // 点遮罩关闭（登录框除外，必须登录）
+  // 点遮罩关闭（登录框除外，必须登录；长表单有改动时先确认）
   $$('.sheet').forEach(function (s) {
     s.addEventListener('click', function (e) {
-      if (s.id === 'login-sheet') return;
-      if (e.target === s) s.classList.remove('open');
+      if (s.id === 'login-sheet' || s.id === 'discard-sheet') return;
+      if (e.target === s) requestCloseSheet(s);
     });
   });
 
@@ -5694,6 +6619,7 @@
   bindSortDrag($('#gear-grid'), 'gear');
 
   renderAssets();
+  syncQClear();
   renderGear();
   renderTrips();
   renderStats();

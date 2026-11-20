@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>装备台账 · 山野手账</title>
-<link rel="stylesheet" href="styles.css?v=35">
+<link rel="stylesheet" href="styles.css?v=42">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -65,22 +65,40 @@
           <div class="hs-k">数量(个)</div>
         </div>
       </div>
+      <div class="hero-scope hidden" id="hero-scope">以下是当前筛选的合计</div>
+      <div class="hero-outdoor hidden" id="hero-outdoor"></div>
+    </div>
+
+    <div class="asset-search">
+      <div class="searchbar">
+        <span>🔍</span>
+        <input id="q" type="search" placeholder="搜索名称、备注、分类" autocomplete="off">
+        <button class="search-clear hidden" id="btn-q-clear" type="button" aria-label="清空搜索">×</button>
+      </div>
     </div>
 
     <div class="asset-tools">
       <div class="chips scroll-x" id="cat-chips"></div>
-      <button class="filter-btn sort-btn" id="btn-asort" aria-pressed="false">排序</button>
+      <button class="filter-btn sort-btn" id="btn-asort" aria-pressed="false" title="拖动调整物品顺序">调整顺序</button>
       <button class="filter-btn" id="btn-afilter">筛选<span class="filter-count" id="afilter-count"></span></button>
     </div>
-
-    <div class="searchbox hidden" id="searchbox">
-      <input id="q" type="search" placeholder="搜索名称、备注…" autocomplete="off">
-      <button id="btn-q-clear">取消</button>
-    </div>
+    <div class="sort-hint hidden" id="asset-sort-hint">按住 ⠿ 拖动调整顺序，改完点右上角「完成」</div>
 
     <div class="demo-tip hidden" id="demo-tip">
-      <div>下方是示例数据。点任意一条进去看看，或点右下角的「＋」记下自己的第一件。</div>
+      <div>下方是示例数据。点任意一条进去看看，或点右下角的「＋」记下自己的第一件装备。</div>
       <button class="text-btn" id="demo-tip-close">知道了</button>
+    </div>
+
+    <div class="firstrun hidden" id="firstrun">
+      <button class="fr-close" id="firstrun-close" type="button" aria-label="关闭引导">×</button>
+      <div class="fr-title">三步开始记账</div>
+      <ol class="fr-steps">
+        <li><b>看看示例</b><span>点下面任意一条，了解日均和单次成本怎么算</span></li>
+        <li><b>记下第一件装备</b><span>名称、价格、日期，三样就够</span>
+          <button class="fr-btn" id="firstrun-add" type="button">去新增</button></li>
+        <li><b>带出门一次</b><span>在行程里勾选装备，回来后点「+1 用过」</span>
+          <button class="fr-btn" id="firstrun-trips" type="button">去行程</button></li>
+      </ol>
     </div>
 
     <div class="scroll-body" id="asset-scroll">
@@ -130,9 +148,10 @@
     </header>
     <div class="gear-tools">
       <div class="chips scroll-x" id="gear-chips"></div>
-      <button class="filter-btn sort-btn" id="btn-gsort" aria-pressed="false">排序</button>
+      <button class="filter-btn sort-btn" id="btn-gsort" aria-pressed="false" title="拖动调整装备顺序">调整顺序</button>
       <button class="filter-btn" id="btn-gfilter">筛选<span class="filter-count" id="gfilter-count"></span></button>
     </div>
+    <div class="sort-hint hidden" id="gear-sort-hint">按住 ⠿ 拖动调整顺序，改完点右上角「完成」</div>
     <div class="scroll-body" id="gear-scroll">
       <div class="gear-groups view-grid" id="gear-grid"></div>
       <div class="empty hidden" id="gear-empty">
@@ -177,10 +196,12 @@
           <span>🔍</span>
           <input id="usage-q" type="search" placeholder="搜索装备、行程、备注" autocomplete="off">
         </div>
-        <p class="trip-usage-summary" id="usage-summary"></p>
+        <div class="usage-scope" id="usage-scope"></div>
         <div class="chips scroll-x" id="usage-chips"></div>
+        <p class="trip-usage-summary" id="usage-summary"></p>
       </div>
       <div class="usage-list" id="usage-list"></div>
+      <p class="usage-foot hidden" id="usage-foot"></p>
       <div class="empty hidden" id="usage-empty"></div>
     </div>
 
@@ -393,10 +414,22 @@
       <span style="width:44px"></span>
     </div>
     <form class="sheet-scroll" id="editor-form" autocomplete="off">
+      <div class="draft-bar hidden" id="editor-draft">
+        <div class="draft-text">发现一份上次没保存的填写</div>
+        <div class="draft-actions">
+          <button type="button" class="text-btn" id="draft-restore">恢复</button>
+          <button type="button" class="text-btn muted" id="draft-ignore">忽略</button>
+        </div>
+      </div>
       <div class="form-section">基本信息</div>
       <div class="form-card">
         <label class="row"><span>名称</span><input name="name" required placeholder="输入名称"></label>
         <label class="row"><span>购买时间</span><input type="date" name="purchaseDate" required></label>
+        <label class="row"><span>价格</span><input type="number" name="price" step="0.01" min="0" placeholder="填写实际到手价" inputmode="decimal"></label>
+        <label class="row"><span>数量</span><input type="number" name="qty" step="1" min="1" value="1" inputmode="numeric"></label>
+        <label class="row"><span>分类</span>
+          <select name="cat" id="editor-cat"></select>
+        </label>
       </div>
 
       <div class="form-section">物品照片（选填）</div>
@@ -413,66 +446,93 @@
         <p class="photo-tip">选一张能看清物品样子的照片，详情页会显示。</p>
       </div>
 
-      <div class="form-section">以下为选填项</div>
+      <button type="button" class="more-toggle" id="editor-more-toggle" aria-expanded="false">
+        <span>更多设置<small>参考价、二手价值、计划年限…</small></span>
+        <span class="more-chev" aria-hidden="true">›</span>
+      </button>
 
-      <div class="form-card">
-        <div class="row" id="icon-row">
-          <span>物品图标</span>
-          <button type="button" class="icon-preview" id="icon-preview">📦 <small>选择</small></button>
+      <div class="editor-more hidden" id="editor-more">
+        <div class="form-card">
+          <div class="row" id="icon-row">
+            <span>物品图标</span>
+            <button type="button" class="icon-preview" id="icon-preview">📦 <small>选择</small></button>
+          </div>
+          <div class="icon-picker hidden" id="icon-picker"></div>
+
+          <label class="row col"><span>标签</span>
+            <input name="tags" placeholder="用逗号隔开，例如：GORE-TEX, 防水, 轻量">
+          </label>
+
+          <label class="row"><span>参考价</span><input type="number" name="officialPrice" step="0.01" min="0" placeholder="选填，和装备库同步" inputmode="decimal"></label>
+          <label class="row"><span>附加费用</span><input type="number" name="extra" step="0.01" min="0" placeholder="运费、配件等" inputmode="decimal"></label>
+
+          <div class="row">
+            <span>计划用多久</span>
+            <span class="inline-input">
+              <input type="number" name="lifeValue" step="1" min="0" placeholder="输入数字" inputmode="numeric">
+              <select name="lifeUnit"><option>年</option><option>月</option><option>天</option></select>
+            </span>
+          </div>
+
+          <label class="row"><span>设置有效期</span><input type="checkbox" name="hasExpiry" class="switch"></label>
+
+          <label class="row"><span>装备分类</span>
+            <select name="gearCat" id="editor-gearCat"></select>
+          </label>
+
+          <label class="row"><span>户外分析</span>
+            <select name="outdoor" id="editor-outdoor">
+              <option value="">跟随分类</option>
+              <option value="1">计入户外</option>
+              <option value="0">不计入</option>
+            </select>
+          </label>
+
+          <label class="row"><span>重量 (g)</span>
+            <input type="number" name="weight" step="1" min="0" placeholder="选填" inputmode="numeric">
+          </label>
+
+          <div class="row hidden" id="editor-link-row">
+            <span>关联装备</span>
+            <span class="row-value" id="editor-link-name"></span>
+          </div>
+
+          <label class="row"><span>使用状态</span>
+            <select name="status">
+              <option>服役中</option><option>预备役</option><option>已退役</option>
+            </select>
+          </label>
+
+          <label class="row"><span>减去二手价值</span><input type="checkbox" name="subtractResale" class="switch"></label>
+          <label class="row"><span>二手价值</span><input type="number" name="resale" step="0.01" min="0" placeholder="未填写" inputmode="decimal"></label>
+
+          <label class="row"><span>使用计数</span>
+            <select name="useMode" id="editor-useMode">
+              <option value="none">不统计</option>
+              <option value="daily">常用（每天）</option>
+              <option value="trip">户外专用（按行程）</option>
+              <option value="manual">偶尔使用（手动 +1）</option>
+            </select>
+          </label>
+          <p class="form-tip" id="editor-useMode-tip"></p>
+
+          <div class="hidden" id="editor-daily-rows">
+            <label class="row"><span>起算日期</span>
+              <input type="date" name="dailyFrom" id="editor-dailyFrom">
+            </label>
+            <label class="row"><span>停用日期</span>
+              <input type="date" name="dailyTo" id="editor-dailyTo">
+            </label>
+            <p class="form-tip">常用设备按自然日折算，起算日默认购买日期；停用日期留空表示一直累计。</p>
+          </div>
         </div>
-        <div class="icon-picker hidden" id="icon-picker"></div>
 
-        <label class="row col"><span>标签</span>
-          <input name="tags" placeholder="用逗号隔开，例如：GORE-TEX, 防水, 轻量">
-        </label>
-
-        <label class="row"><span>价格</span><input type="number" name="price" step="0.01" min="0" placeholder="填写实际到手价" inputmode="decimal"></label>
-        <label class="row"><span>参考价</span><input type="number" name="officialPrice" step="0.01" min="0" placeholder="选填，和装备库同步" inputmode="decimal"></label>
-        <label class="row"><span>数量</span><input type="number" name="qty" step="1" min="1" value="1" inputmode="numeric"></label>
-        <label class="row"><span>附加费用</span><input type="number" name="extra" step="0.01" min="0" placeholder="运费、配件等" inputmode="decimal"></label>
-
-        <div class="row">
-          <span>计划用多久</span>
-          <span class="inline-input">
-            <input type="number" name="lifeValue" step="1" min="0" placeholder="输入数字" inputmode="numeric">
-            <select name="lifeUnit"><option>年</option><option>月</option><option>天</option></select>
-          </span>
+        <div class="form-card">
+          <label class="row col"><span>备注</span><textarea name="notes" rows="2" placeholder="尺码、磨损、保养…"></textarea></label>
         </div>
-
-        <label class="row"><span>设置有效期</span><input type="checkbox" name="hasExpiry" class="switch"></label>
-
-        <label class="row"><span>分类</span>
-          <select name="cat" id="editor-cat"></select>
-        </label>
-
-        <label class="row"><span>装备分类</span>
-          <select name="gearCat" id="editor-gearCat"></select>
-        </label>
-
-        <label class="row"><span>重量 (g)</span>
-          <input type="number" name="weight" step="1" min="0" placeholder="选填" inputmode="numeric">
-        </label>
-
-        <div class="row hidden" id="editor-link-row">
-          <span>关联装备</span>
-          <span class="row-value" id="editor-link-name"></span>
-        </div>
-
-        <label class="row"><span>使用状态</span>
-          <select name="status">
-            <option>服役中</option><option>预备役</option><option>已退役</option>
-          </select>
-        </label>
-
-        <label class="row"><span>减去二手价值</span><input type="checkbox" name="subtractResale" class="switch"></label>
-        <label class="row"><span>二手价值</span><input type="number" name="resale" step="0.01" min="0" placeholder="未填写" inputmode="decimal"></label>
-
-        <label class="row"><span>计算单次使用</span><input type="checkbox" name="trackPerUse" class="switch"></label>
       </div>
 
-      <div class="form-card">
-        <label class="row col"><span>备注</span><textarea name="notes" rows="2" placeholder="尺码、磨损、保养…"></textarea></label>
-      </div>
+      <div class="cost-preview hidden" id="editor-cost"></div>
 
       <div class="dock">
         <button type="submit" class="btn-main">保存</button>
@@ -495,7 +555,7 @@
         <button class="btn-main small" id="cat-add">添加</button>
       </div>
       <div class="cats-list" id="cats-list"></div>
-      <p class="cats-tip">删除分类时，这个分类下的物品会自动移到「其他」。</p>
+      <p class="cats-tip">点亮「户外」的分类会计入户外分析，个别物品可以在物品编辑里单独设置。<br>删除分类时，这个分类下的物品会自动移到「其他」。</p>
     </div>
   </div>
 </div>
@@ -697,9 +757,9 @@
           <input id="picker-q" type="search" placeholder="搜索资产名称、分类" autocomplete="off">
         </div>
       </div>
+      <div class="picker-scope" id="picker-scope"></div>
       <div id="picker-list" class="picker-list"></div>
-      <div style="height:8px"></div>
-    </div>
+      <div style="height:8px"></div>    </div>
     <div class="dock">
       <button class="btn-main" id="picker-add">加入</button>
     </div>
@@ -806,6 +866,40 @@
   </div>
 </div>
 
+<!-- ================= 同步状态 ================= -->
+<div class="sheet" id="sync-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <button class="icon-btn" data-close>‹</button>
+      <strong>同步状态</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll" id="sync-body"></div>
+    <div class="dock">
+      <button class="btn-main" id="sync-retry">立即同步</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 未保存确认 ================= -->
+<div class="sheet" id="discard-sheet">
+  <div class="sheet-panel sheet-mid">
+    <div class="sheet-head">
+      <span style="width:44px"></span>
+      <strong>有未保存的修改</strong>
+      <span style="width:44px"></span>
+    </div>
+    <div class="sheet-scroll">
+      <div class="discard-wrap">
+        <p class="discard-sub" id="discard-sub">直接关闭的话，这次填写的内容会丢失。</p>
+        <button class="btn-main" id="discard-save">保存</button>
+        <button class="btn-main ghost" id="discard-close">继续编辑</button>
+        <button class="text-btn danger" id="discard-lose">不保存，直接关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= 通用图标选择 ================= -->
 <div class="toast" id="toast"></div>
 
@@ -813,7 +907,7 @@
 <script src="cloud.js?v=25"></script>
 <script src="icons.js?v=24"></script>
 <script src="icons3d.js?v=24"></script>
-<script src="app.js?v=42"></script>
+<script src="app.js?v=53"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () {
