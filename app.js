@@ -5139,15 +5139,15 @@
         '<div class="trip-hero-meta">' + meta.map(function (m) { return '<span>' + m + '</span>'; }).join('') + '</div>' +
       '</div>' +
       '<div class="trip-actions">' +
-        '<button class="trip-act" data-trip-edit="' + t.id + '">编辑行程</button>' +
+        '<button class="trip-act" data-trip-edit="' + t.id + '">✏️ 编辑行程</button>' +
         ((t.status === '计划中' || t.status === '进行中')
-          ? '<button class="trip-act" data-trip-cancel="' + t.id + '">取消行程</button>' : '') +
-        '<button class="trip-act danger" data-trip-delete="' + t.id + '">删除行程</button>' +
+          ? '<button class="trip-act" data-trip-cancel="' + t.id + '">🚫 取消行程</button>' : '') +
+        '<button class="trip-act danger" data-trip-delete="' + t.id + '">🗑️ 删除行程</button>' +
       '</div>' +
       '<div class="trip-section">' +
         '<div class="trip-section-head"><div><h3>装备清单</h3><p>共 ' + gears.length + ' 件 · 计划携带 ' +
           plannedCount + ' 件' + (weight ? ' · 计划总重 ' + fmtWeight(weight) : '') + '</p></div>' +
-          '<button class="text-btn" data-trip-add-gear="1">+ 添加装备</button></div>' +
+          '<button class="trip-add-btn" data-trip-add-gear="1">＋ 添加装备</button></div>' +
         (gearHtml || '<div class="trip-empty-inline">还没有装备。可以套用模板，或从资产里添加。</div>') +
         missHtml +
         (missingWeight ? '<div class="trip-miss">有 ' + missingWeight +
@@ -5791,9 +5791,7 @@
       if (scope !== 'all' && !isOutdoorItem(it)) return false;
       if (!q) return true;
       return (it.name + ' ' + (it.cat || '') + ' ' + (it.gearCat || '')).toLowerCase().indexOf(q) >= 0;
-    }).sort(function (a, b) {
-      return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
-    });
+    }).sort(assetBaseCmp); /* 跟资产列表一样按购买时间倒序，新买的在前 */
     box.innerHTML = list.length ? list.map(function (it) {
       var on = !!state.pickerSelected[it.id];
       var outdoor = isOutdoorItem(it);
