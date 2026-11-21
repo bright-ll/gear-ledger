@@ -763,6 +763,9 @@
     statsScope: (function () {
       try { return localStorage.getItem(LS_STATS_SCOPE) === 'all' ? 'all' : 'outdoor'; } catch (e) { return 'outdoor'; }
     })(),
+    statsData: null,
+    statsDetailType: '',
+    statsDetailPeruseDesc: false,
     scrollPos: {},
     q: '',
     assetView: (function () {
@@ -3165,14 +3168,40 @@
         '<span>' + yr.count + '件<br>' + String(yr.y).slice(2) + '</span></div>';
     }).join('');
     var monthPanel =
-      '<div class="panel st-panel-month">' +
-        '<h3>年度投入</h3><p class="sub">' +
+      '<div class="panel st-panel-month" data-stats-detail="years">' +
+        '<h3>年度投入 ›</h3><p class="sub">' +
           '每年买入金额与件数（已扣二手价值）' + scopeNote + '，固定显示近 6 个自然年</p>' +
         '<div class="st-bars">' + barsHtml + '</div>' +
         '<div class="st-bars-foot"><span>' +
           (thisYear.total ? '今年 ' + cash(thisYear.total) + ' · ' + thisYear.count + ' 件' : '今年还没买入') +
         '</span><span>平均每年 <b>' + cash(avgYear) + '</b></span></div>' +
       '</div>';
+
+    /* 二级页数据快照：面板渲染时顺手存一份，点进「查看全部」直接复用同一份数据 */
+    var yearItems = years.map(function (yr) {
+      return { y: yr.y, names: items.filter(function (x) {
+        var pd = parseDate(x.it.purchaseDate);
+        return pd && pd.getFullYear() === yr.y;
+      }).map(function (x) { return x.it.name; }) };
+    });
+    var tierItems = TIERS.map(function (t) { return { label: t.label, names: [] }; });
+    items.forEach(function (x) {
+      var qty = Number(x.it.qty) || 1;
+      var unit = qty ? x.c.net / qty : 0;
+      for (var tj = 0; tj < TIERS.length; tj++) {
+        if (unit >= TIERS[tj].min) { tierItems[tj].names.push(x.it.name); break; }
+      }
+    });
+    state.statsData = {
+      scopeNote: scopeNote,
+      total: total,
+      catRows: catRows,
+      years: years, yearItems: yearItems,
+      tierLabels: TIERS.map(function (t) { return t.label; }),
+      tierAgg: tierAgg, tierItems: tierItems,
+      peruse: pu, idle: idleList, idleRate: idleRate,
+      trips: tripRows, life: lifeRows
+    };
 
     $('#stats-body').innerHTML =
       statsHeadHtml() +
@@ -3188,23 +3217,23 @@
         '</div>' +
       '</div>' +
       monthPanel +
-      '<div class="panel">' +
-        '<h3>' + (scope === 'outdoor' ? '装备分类占比' : '分类占比') + '</h3><p class="sub">按金额（已扣二手价值）' +
+      '<div class="panel" data-stats-detail="cats">' +
+        '<h3>' + (scope === 'outdoor' ? '装备分类占比' : '分类占比') + ' ›</h3><p class="sub">按金额（已扣二手价值）' +
         (scope === 'outdoor' ? ' · 按装备分类' : '') + scopeNote + '</p>' +
         '<div class="st-donut-row">' + donutHtml + '<ul class="st-legend">' + legendHtml + '</ul></div>' +
       '</div>' +
-      '<div class="panel">' +
-        '<h3>投入价格段</h3><p class="sub">按单件到手价分档（已扣二手价值）' + scopeNote + '</p>' +
+      '<div class="panel" data-stats-detail="tiers">' +
+        '<h3>投入价格段 ›</h3><p class="sub">按单件到手价分档（已扣二手价值）' + scopeNote + '</p>' +
         tierHtml +
         '<div class="st-bars-foot" style="margin-top:14px"><span>大件（≥500）' + bigQty + ' 件</span>' +
           '<span>金额占 <b>' + bigPct + '%</b></span></div>' +
       '</div>' +
-      '<div class="panel st-panel-vs">' +
-        '<h3>单次成本排行</h3><p class="sub">按累计使用次数摊薄 · 越少越划算' + scopeNote + '</p>' +
+      '<div class="panel st-panel-vs" data-stats-detail="peruse">' +
+        '<h3>单次成本排行 ›</h3><p class="sub">按累计使用次数摊薄 · 越少越划算' + scopeNote + '</p>' +
         vsHtml +
       '</div>' +
-      '<div class="panel st-panel-idle">' +
-        '<div class="st-head"><div><h3>闲置率</h3><p class="sub">服役超过 30 天，180 天内没用过' +
+      '<div class="panel st-panel-idle" data-stats-detail="idle">' +
+        '<div class="st-head"><div><h3>闲置率 ›</h3><p class="sub">服役超过 30 天，180 天内没用过' +
           (scope === 'outdoor' ? '（仅户外装备）' : '') + '</p></div>' +
           '<span class="st-chip' + (idleRate >= 50 ? ' bad' : '') + '">' + idleRate + '%</span></div>' +
         '<div class="st-idle-hero"><b>' + idleRate + '%</b><span>' +
@@ -3213,16 +3242,150 @@
           (idleCandidates.length ? '没有长期闲置的物品，状态不错' : '服役超过 30 天的物品还不多，暂时无法统计') +
         '</div>') +
       '</div>' +
-      '<div class="panel st-panel-trips">' +
-        '<h3>行程花费排行</h3><p class="sub">只统计已完成的行程 · 装备按实际使用摊入</p>' +
+      '<div class="panel st-panel-trips" data-stats-detail="trips">' +
+        '<h3>行程花费排行 ›</h3><p class="sub">只统计已完成的行程 · 装备按实际使用摊入</p>' +
         (tripRankHtml || '<div class="st-empty">还没有已完成的行程，完成后这里会按花费排名</div>') +
       '</div>' +
-      '<div class="panel st-panel-life">' +
-        '<div class="st-head"><div><h3>寿命进度</h3><p class="sub">已持有 / 计划使用年限，超期标红' + scopeNote + '</p></div>' +
+      '<div class="panel st-panel-life" data-stats-detail="life">' +
+        '<div class="st-head"><div><h3>寿命进度 ›</h3><p class="sub">已持有 / 计划使用年限，超期标红' + scopeNote + '</p></div>' +
           lifeChip + '</div>' +
         lifeHtml +
       '</div>' +
       '<div style="height:8px"></div>';
+  }
+
+  /* =========================================================
+     分析二级页：点任意面板进入，看该维度的完整排行
+     ========================================================= */
+  function openStatsDetail(type) {
+    state.statsDetailType = type;
+    renderStatsDetail();
+    openSheet('#stats-detail-sheet');
+  }
+  function renderStatsDetail() {
+    var body = $('#stats-detail-body');
+    var d = state.statsData;
+    if (!body || !d) return;
+    var type = state.statsDetailType;
+    var title = '', sub = '', html = '';
+    var bar = function (pct) {
+      return '<div class="sd-bar"><i style="width:' + Math.max(2, Math.min(100, Math.round(pct))) + '%"></i></div>';
+    };
+    function remainTxt(dd) {
+      if (dd >= 365) { var y = dd / 365; return (y >= 10 ? Math.round(y) : Math.round(y * 10) / 10) + ' 年'; }
+      if (dd >= 30) return Math.round(dd / 30) + ' 个月';
+      return dd + ' 天';
+    }
+
+    if (type === 'cats') {
+      title = '分类排行';
+      sub = '按金额（已扣二手价值）' + d.scopeNote;
+      html = d.catRows.map(function (r) {
+        var pct = d.total ? r.amount / d.total * 100 : 0;
+        return '<div class="sd-row cc' + r.ci + '">' +
+          '<div class="sd-row-top"><i class="sd-dot"></i><b>' + esc(r.name) + '</b><i class="sd-val">' +
+            (pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10) + '%</i></div>' +
+          bar(pct) +
+          '<div class="sd-row-sub">' + r.qty + ' 件 · ' + cash(r.amount) + '</div>' +
+        '</div>';
+      }).join('');
+    } else if (type === 'tiers') {
+      title = '投入价格段';
+      sub = '按单件到手价分档（已扣二手价值）' + d.scopeNote;
+      var tMax = 1;
+      d.tierAgg.forEach(function (t) { if (t.amount > tMax) tMax = t.amount; });
+      html = d.tierLabels.map(function (label, i) {
+        var a = d.tierAgg[i];
+        var pct = d.total ? a.amount / d.total * 100 : 0;
+        return '<div class="sd-row">' +
+          '<div class="sd-row-top"><b>' + label + '</b><i class="sd-val">' + a.qty + ' 件 · ' + cash(a.amount) +
+            ' · ' + (pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10) + '%</i></div>' +
+          bar(a.amount / tMax * 100) +
+          (d.tierItems[i].names.length
+            ? '<div class="sd-group">' + d.tierItems[i].names.map(esc).join('、') + '</div>'
+            : '<div class="sd-group">这一档还没有物品</div>') +
+        '</div>';
+      }).join('');
+    } else if (type === 'years') {
+      title = '年度投入明细';
+      sub = '近 6 个自然年，每年买入的物品' + d.scopeNote;
+      var yMax = 1;
+      d.years.forEach(function (y) { if (y.total > yMax) yMax = y.total; });
+      html = d.years.map(function (yr, i) {
+        var pct = d.total ? yr.total / d.total * 100 : 0;
+        return '<div class="sd-row">' +
+          '<div class="sd-row-top"><b>' + yr.y + ' 年</b><i class="sd-val">' + yr.count + ' 件 · ' + cash(yr.total) +
+            ' · ' + (pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10) + '%</i></div>' +
+          bar(yr.total / yMax * 100) +
+          (d.yearItems[i].names.length
+            ? '<div class="sd-group">' + d.yearItems[i].names.map(esc).join('、') + '</div>'
+            : '<div class="sd-group">这一年没有买入</div>') +
+        '</div>';
+      }).join('');
+    } else if (type === 'peruse') {
+      title = '单次成本排行（全部）';
+      var list = d.peruse.slice().sort(function (a, b) {
+        return state.statsDetailPeruseDesc ? b.c.perUse - a.c.perUse : a.c.perUse - b.c.perUse;
+      });
+      sub = '共 ' + list.length + ' 件有使用记录' + d.scopeNote;
+      html = '<div class="sd-toggle-row"><button type="button" class="chip on" id="sd-peruse-toggle">' +
+        (state.statsDetailPeruseDesc ? '当前：最烧钱在前' : '当前：最划算在前') + '</button></div>' +
+        list.map(function (x, i) {
+          var daily = useModeOf(x.it) === 'daily';
+          return '<div class="sd-row">' +
+            '<div class="sd-row-top"><span class="sd-idx">' + (i + 1) + '</span><b>' + esc(x.it.name) + '</b>' +
+              (daily ? '<i class="st-mini-tag">日常</i>' : '') +
+              '<i class="sd-val">' + cash(x.c.perUse) + '</i></div>' +
+            '<div class="sd-row-sub">' + (daily ? '已用 ' + x.c.used + ' 天 · 按天折算' : '已用 ' + x.c.used + ' 次') + '</div>' +
+          '</div>';
+        }).join('');
+      if (!list.length) html = '<div class="st-empty">还没有物品产生使用记录，用了之后就能看到单次成本</div>';
+    } else if (type === 'idle') {
+      title = '长期闲置清单';
+      var idleSorted = d.idle.slice().sort(function (a, b) { return b.c.net - a.c.net; });
+      var idleSum = idleSorted.reduce(function (s, x) { return s + x.c.net; }, 0);
+      sub = '服役超过 30 天，180 天内没用过 · ' + idleSorted.length + ' 件 · 合计 ' + cash(idleSum) + d.scopeNote;
+      html = idleSorted.map(function (x) {
+        var last = lastUsageDate(x.it.id);
+        var when = last ? '上次使用 ' + diffDays(last) + ' 天前' : '从未使用';
+        return '<div class="sd-row">' +
+          '<div class="sd-row-top"><b>' + esc(x.it.name) + '</b><i class="sd-val">' + cash(x.c.net) + '</i></div>' +
+          '<div class="sd-row-sub">' + when + '</div>' +
+        '</div>';
+      }).join('');
+    } else if (type === 'trips') {
+      title = '行程花费排行（全部）';
+      sub = '只统计已完成的行程 · 装备按实际使用摊入';
+      html = d.trips.map(function (x, i) {
+        return '<div class="sd-row sd-click" data-sd-trip="' + x.t.id + '">' +
+          '<div class="sd-row-top"><span class="sd-idx">' + (i + 1) + '</span><b>' + esc(x.t.name) + '</b><i class="sd-val">' + cash(x.c.total) + '</i></div>' +
+          '<div class="sd-row-sub">' + tripDatesText(x.t) + ' · 人均 ' + (x.c.per == null ? '数据不足' : cash(x.c.per)) + '</div>' +
+        '</div>';
+      }).join('');
+    } else if (type === 'life') {
+      title = '寿命进度（全部）';
+      sub = '已持有 / 计划使用年限，超期标红' + d.scopeNote;
+      html = d.life.map(function (x) {
+        var it = x.it, c = x.c;
+        var pct = Math.min(100, Math.round(c.days / c.life * 100));
+        var left = c.life - c.days;
+        var chip;
+        if (c.overdue) chip = '<span class="st-life-chip bad">超 ' + money2(c.days - c.life) + ' 天</span>';
+        else if (left <= 0) chip = '<span class="st-life-chip">已满计划</span>';
+        else if (left <= 90) chip = '<span class="st-life-chip warn">剩 ' + remainTxt(left) + '</span>';
+        else chip = '<span class="st-life-chip ok">剩 ' + remainTxt(left) + '</span>';
+        return '<div class="sd-row">' +
+          '<div class="sd-row-top"><b>' + esc(it.name) + '</b>' + chip + '</div>' +
+          bar(pct) +
+          '<div class="sd-row-sub">已持有 ' + money2(c.days) + ' 天 · 计划 ' + esc(it.lifeValue + ' ' + (it.lifeUnit || '天')) + '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    $('#stats-detail-title').textContent = title;
+    $('#stats-detail-sub').innerHTML = sub;
+    body.innerHTML = html || '<div class="st-empty">这个范围下暂时没有数据</div>';
+    body.scrollTop = 0;
   }
 
   /* =========================================================
@@ -5031,7 +5194,7 @@
     saveAll();
     renderTrips();
     renderStats();
-    openTrip(id);
+    closeSheet('#trip-sheet');
     toast('行程已开始');
   }
 
@@ -5043,7 +5206,7 @@
     saveAll();
     renderTrips();
     renderStats();
-    openTrip(id);
+    closeSheet('#trip-sheet');
     toast('已恢复为计划中');
   }
 
@@ -6123,6 +6286,20 @@
       if (tripById(tid)) openTrip(tid);
       return;
     }
+    /* 分析二级页：行程行直接打开行程；面板空白进入完整排行 */
+    var sdTrip = el.closest('[data-sd-trip]');
+    if (sdTrip) {
+      closeSheet('#stats-detail-sheet');
+      openTrip(sdTrip.getAttribute('data-sd-trip'));
+      return;
+    }
+    if (el.closest('#sd-peruse-toggle')) {
+      state.statsDetailPeruseDesc = !state.statsDetailPeruseDesc;
+      renderStatsDetail();
+      return;
+    }
+    var sdPanel = el.closest('[data-stats-detail]');
+    if (sdPanel) { openStatsDetail(sdPanel.getAttribute('data-stats-detail')); return; }
     if (el.closest('#btn-trip-confirm')) { confirmTrip(); return; }
     var cbatch = el.closest('[data-confirm-batch]');
     if (cbatch) {

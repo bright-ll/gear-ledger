@@ -2208,3 +2208,30 @@ body.sort-dragging .g-text{transition:none}
 .st-tier-top span{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
 .st-tier-bar{height:10px;border-radius:5px;background:var(--line2);overflow:hidden}
 .st-tier-bar i{display:block;height:100%;border-radius:5px;background:var(--st-bar)}
+
+/* 弹层层叠：编辑层盖在详情(60)之上，选择资产再盖住编辑层，确认与放弃层盖住一切 */
+#trip-editor-sheet,
+#tpl-editor-sheet{z-index:65}
+#picker-sheet{z-index:66}
+#trip-confirm-sheet,
+#trip-delete-sheet,
+#gdelete-sheet,
+#discard-sheet{z-index:70}
+
+/* 分析二级页：各面板点进去看完整排行 */
+.panel[data-stats-detail]{cursor:pointer}
+.sd-sub{padding:12px 16px 4px;font-size:12px;color:var(--sub)}
+#stats-detail-body{padding:8px 14px 20px;display:flex;flex-direction:column;gap:10px}
+.sd-row{background:var(--card);border-radius:12px;padding:11px 13px}
+.sd-row.sd-click{cursor:pointer}
+.sd-row-top{display:flex;align-items:baseline;gap:8px}
+.sd-row-top b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.sd-idx{flex:none;min-width:16px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sd-val{flex:none;font-style:normal;font-weight:800;font-size:14px;font-variant-numeric:tabular-nums}
+.sd-row-sub{margin-top:5px;font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;line-height:1.5}
+.sd-bar{height:8px;border-radius:4px;background:var(--line2);margin-top:8px;overflow:hidden}
+.sd-bar i{display:block;height:100%;border-radius:4px;background:var(--st-bar)}
+.sd-dot{flex:none;width:9px;height:9px;border-radius:50%;background:var(--cc);align-self:center}
+.sd-group{margin-top:7px;font-size:11.5px;color:var(--sub);line-height:1.7}
+.sd-toggle-row{padding:2px 0 2px}
+.sd-toggle-row .chip{font-size:12px;padding:5px 12px}
