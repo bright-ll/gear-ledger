@@ -185,9 +185,12 @@
     if (changed) saveAll();
   }
 
+  /* 日常分类的物品默认按天折算，户外默认按行程，其余默认手动 */
+  var DAILY_USE_CATS = { '数码': 1, '家电': 1, '家具': 1, '生活用品': 1 };
   function defaultUseMode(d) {
     if (d && (d.gearCat || d.catalogId)) return 'trip';
     if (d && d.cat && isOutdoorCat(d.cat)) return 'trip';
+    if (d && d.cat && DAILY_USE_CATS[d.cat]) return 'daily';
     return 'manual';
   }
 
@@ -887,6 +890,45 @@
     if (cat && allCats().indexOf(cat) < 0) cat = '';
     sel.value = cat;
     syncGearCatRow(sel.value, true);
+    autoFillGearCat();
+  }
+
+  /* 图标 → 装备分类：新增户外物品时自动带出装备分类，仍可手动改 */
+  var ICON_GEAR_CAT = {
+    'backpack': '背负', 'trekking-pole': '行进', 'flashlight': '行进', 'lantern': '行进',
+    'compass': '行进', 'map': '行进', 'map-pin': '行进', 'telescope': '行进',
+    'kayak': '行进', 'fish-hook': '行进',
+    'jacket': '穿着', 'shirt': '穿着', 'jeans': '穿着', 'shorts': '穿着',
+    'gloves': '穿着', 'cap': '穿着', 'scarf': '穿着',
+    'shoe': '鞋袜', 'sock': '鞋袜',
+    'tent': '睡眠', 'sleeping-bag': '睡眠', 'bed': '睡眠',
+    'campfire': '饮食',
+    'first-aid-kit': '安全', 'sos': '安全', 'lifebuoy': '安全',
+    'helmet': '安全', 'safety-vest': '安全',
+    'device-watch': '数码', 'camera': '数码', 'battery': '数码', 'satellite': '数码'
+  };
+  /* 名字推断：和详情/分析的兜底同一套规则，但不匹配时留空，不强塞默认值 */
+  function guessGearCatFromName(name) {
+    var hay = (name || '').toLowerCase();
+    if (/帐|篷|睡袋|睡垫|枕头/.test(hay)) return '睡眠';
+    if (/背包|重装包|腰包|驮包|背负/.test(hay)) return '背负';
+    if (/鞋|靴|袜|鞋垫|雪套|冰爪/.test(hay)) return '鞋袜';
+    if (/冲锋衣|软壳|硬壳|羽绒|抓绒|衣|裤|帽|手套|围脖|袖/.test(hay)) return '穿着';
+    if (/炉|锅|杯|餐具|水壶|气罐|净水|餐/.test(hay)) return '饮食';
+    if (/杖|灯|导航|表|水袋|头巾|墨镜|太阳镜/.test(hay)) return '行进';
+    if (/急救|头盔|安全带|主锁|绳索|哨|护膝/.test(hay)) return '安全';
+    if (/相机|手机|对讲|gps|充电|电池|手环/.test(hay)) return '数码';
+    return '';
+  }
+  /* 分类切到户外且装备分类还空着时自动带出；编辑旧物品不动已有值 */
+  function autoFillGearCat() {
+    if (state.editingId) return;
+    var form = $('#editor-form');
+    if (!form || !form.elements.gearCat) return;
+    if (form.elements.cat.value !== '户外') return;
+    if (form.elements.gearCat.value) return;
+    var gc = (state.formIcon && ICON_GEAR_CAT[state.formIcon]) || guessGearCatFromName(form.elements.name.value);
+    if (gc) form.elements.gearCat.value = gc;
   }
 
   function renderFormPhoto(kind) {
@@ -1153,7 +1195,8 @@
     var catHtml = ['全部分类'].concat(allCatList).concat(
       (allCatList.indexOf('未分类') < 0 && DB.items.some(function (it) { return !it.deleted && !it.cat; })) ? ['未分类'] : []
     ).map(function (c) {
-      return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-afcat2="' + esc(c) + '">' + esc(c) + '</button>';
+      var label = c === '全部分类' ? '全部' : c;
+      return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-afcat2="' + esc(c) + '">' + esc(label) + '</button>';
     }).join('');
     var sortHtml = [['date', '默认'], ['daily', '按日均'], ['price', '按价格'], ['days', '按天数'], ['manual', '自定义']].map(function (o) {
       return '<button class="chip ' + (state.sort === o[0] ? 'on' : '') + '" data-afsort="' + o[0] + '">' + o[1] + '</button>';
@@ -1264,7 +1307,8 @@
       all.push('未分类');
     }
     renderChips($('#cat-chips'), all.map(function (c) {
-      return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-cat="' + esc(c) + '">' + esc(c) + '</button>';
+      var label = c === '全部分类' ? '全部' : c;
+      return '<button class="chip ' + (state.cat === c ? 'on' : '') + '" data-cat="' + esc(c) + '">' + esc(label) + '</button>';
     }).join(''));
   }
 
@@ -1296,8 +1340,8 @@
   }
 
   /* ---------- 资产的三种视图 ---------- */
-  function assetRowHtml(it, c, badge, sub) {
-    return '<article class="asset" data-id="' + it.id + '">' +
+  function assetRowHtml(it, c, badge, sub, stCls) {
+    return '<article class="asset' + stCls + '" data-id="' + it.id + '">' +
       '<div class="a-icon" style="background:' + iconBg(it.cat) + '">' + iconMarkup(it.iconImg || it.icon) + '</div>' +
       '<div class="a-body">' +
         '<div class="a-line1">' +
@@ -1313,9 +1357,9 @@
     '</article>';
   }
 
-  function assetCardHtml(it, c, badge) {
+  function assetCardHtml(it, c, badge, stCls) {
     var q = Number(it.qty) || 1;
-    return '<article class="acard" data-id="' + it.id + '">' +
+    return '<article class="acard' + stCls + '" data-id="' + it.id + '">' +
       '<div class="acard-top' + (it.photo ? ' has-photo' : '') + '" style="background:' + iconBg(it.cat) + '">' +
         (it.photo ? '<img class="acard-photo" src="' + esc(it.photo) + '" alt="">' : '') +
         '<span class="acard-ico">' + iconMarkup(it.iconImg || it.icon) + '</span>' +
@@ -1330,9 +1374,9 @@
     '</article>';
   }
 
-  function assetTextHtml(it, c, badge) {
+  function assetTextHtml(it, c, badge, stCls) {
     var q = Number(it.qty) || 1;
-    return '<div class="aitem" data-id="' + it.id + '">' +
+    return '<div class="aitem' + stCls + '" data-id="' + it.id + '">' +
       '<span class="at-name">' + esc(it.name) + badge + '</span>' +
       '<span class="at-days' + (c.overdue ? ' over' : '') + '">' + c.days + '天</span>' +
       '<span class="at-price">' + (q > 1 ? '×' + q + ' · ' : '') +  cash(c.net) + '</span>' +
@@ -1383,7 +1427,7 @@
 
     var asortBtn = $('#btn-asort');
     if (asortBtn) {
-      asortBtn.textContent = state.assetSorting ? '完成' : '调整顺序';
+      asortBtn.textContent = state.assetSorting ? '完成' : '排序';
       asortBtn.classList.toggle('on', state.assetSorting);
       asortBtn.setAttribute('aria-pressed', state.assetSorting ? 'true' : 'false');
     }
@@ -1397,6 +1441,7 @@
       sumCount += (Number(it.qty) || 1);
 
       var st = statusOf(it, c);
+      var stCls = st === '已退役' ? ' st-retired' : st === '预备役' ? ' st-reserve' : st === '已超期' ? ' st-overdue' : '';
       var badge = '';
       if (st === '已超期') badge = '<span class="a-badge">已超期</span>';
       else if (st === '已退役') badge = '<span class="a-badge" style="background:#f2f4f9;color:#8b90a0">已退役</span>';
@@ -1415,9 +1460,9 @@
               ' · ' + usedTxt + '</span>' + quickBtn + '</div>';
       }
 
-      if (view === 'grid') return assetCardHtml(it, c, badge);
-      if (view === 'text') return assetTextHtml(it, c, badge);
-      return assetRowHtml(it, c, badge, sub);
+      if (view === 'grid') return assetCardHtml(it, c, badge, stCls);
+      if (view === 'text') return assetTextHtml(it, c, badge, stCls);
+      return assetRowHtml(it, c, badge, sub, stCls);
     }).join('');
 
     if (state.assetSorting) buildSortUi(box, 'asset');
@@ -1645,8 +1690,18 @@
   function gearCatForAsset(it) {
     if (it.gearCat) return it.gearCat;
     var hay = (it.name || '') + ' ' + (it.tags || []).join(' ');
-    if (/冲锋衣|软壳|硬壳|羽绒|抓绒|鹅绒|绒|服|衣|裤|帽|手套|围脖/.test(hay)) return '穿着';
+    if (/冲锋衣|软壳|硬壳|羽绒|抓绒|绒|服|衣|裤|帽|手套|围脖/.test(hay)) return '穿着';
     return mapGearCat(it);
+  }
+
+  /* 分析页用：物品填的装备分类 → 关联装备库的分类 → 按名字推断 */
+  function assetGearCat(it) {
+    if (it.gearCat) return it.gearCat;
+    if (it.catalogId) {
+      var g = DB.gear.find(function (x) { return x.id === it.catalogId && !x.deleted; });
+      if (g && g.cat) return g.cat;
+    }
+    return gearCatForAsset(it);
   }
 
   function addItemToGear(it) {
@@ -1751,6 +1806,7 @@
     });
     if (formMode !== 'daily' && formMode !== 'trip' && formMode !== 'manual') formMode = 'none';
     if (f.elements.useMode) f.elements.useMode.value = formMode;
+    state.useModeTouched = false;
     if (f.elements.dailyFrom) {
       f.elements.dailyFrom.value = formMode === 'daily'
         ? (d.dailyFrom || d.purchaseDate || todayStr()) : '';
@@ -2050,7 +2106,7 @@
 
     var gsortBtn = $('#btn-gsort');
     if (gsortBtn) {
-      gsortBtn.textContent = state.gearSorting ? '完成' : '调整顺序';
+      gsortBtn.textContent = state.gearSorting ? '完成' : '排序';
       gsortBtn.classList.toggle('on', state.gearSorting);
       gsortBtn.setAttribute('aria-pressed', state.gearSorting ? 'true' : 'false');
     }
@@ -2843,7 +2899,8 @@
 
     items.forEach(function (x) {
       var qty = Number(x.it.qty) || 1;
-      var cat = x.it.cat || '其他';
+      /* 户外装备范围按「装备分类」细分，避免只剩一个「户外」看不出结构 */
+      var cat = scope === 'outdoor' ? assetGearCat(x.it) : (x.it.cat || '其他');
       total += x.c.net;
       if (x.c.daily != null) { daily += x.c.daily; dailyKnown++; }
       count += qty;
@@ -2910,7 +2967,8 @@
       '</div>';
     }).join('');
 
-    /* 固定分类用固定色，自定义分类按名称散列，避免每次刷新换颜色 */
+    /* 固定分类用固定色，自定义分类按名称散列，避免每次刷新换颜色。
+       户外装备范围按装备分类分组时，8 个装备分类要有各自的颜色 */
     var CAT_COLOR = {
       '户外': 0, '背负': 0, '行进': 0, '穿着': 0,
       '数码': 1, '家电': 2, '鞋袜': 2,
@@ -2918,7 +2976,14 @@
       '家具': 4, '睡眠': 4,
       '安全': 5, '其他': 6
     };
+    var GEAR_CAT_COLOR = {
+      '背负': 0, '穿着': 1, '鞋袜': 2, '睡眠': 3,
+      '饮食': 4, '行进': 5, '安全': 6
+    };
     function colorIdx(name) {
+      if (scope === 'outdoor' && Object.prototype.hasOwnProperty.call(GEAR_CAT_COLOR, name)) {
+        return GEAR_CAT_COLOR[name];
+      }
       if (Object.prototype.hasOwnProperty.call(CAT_COLOR, name)) return CAT_COLOR[name];
       var h = 0;
       for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 7;
@@ -3053,53 +3118,42 @@
     var heroMain = dot >= 0 ? totalTxt.slice(0, dot) : totalTxt;
     var heroDec = dot >= 0 ? totalTxt.slice(dot) : '';
 
-    /* 月度支出：今年按月排；全部/近12个月按滚动 12 个月排 */
-    var months = [];
-    var mi;
-    if (range === 'year') {
-      for (mi = 0; mi < 12; mi++) {
-        months.push({ key: nowYear + '-' + pad(mi + 1), label: String(mi + 1), full: (mi + 1) + '月', total: 0 });
-      }
-    } else {
-      var baseM = new Date();
-      for (mi = 11; mi >= 0; mi--) {
-        var md = new Date(baseM.getFullYear(), baseM.getMonth() - mi, 1);
-        months.push({
-          key: md.getFullYear() + '-' + pad(md.getMonth() + 1),
-          label: String(md.getMonth() + 1),
-          full: (md.getMonth() + 1) + '月',
-          total: 0
-        });
-      }
+    /* 年度投入：固定近 6 个自然年，不受顶部时间筛选影响（装备按年看节奏更真实） */
+    var years = [];
+    var yi;
+    for (yi = 5; yi >= 0; yi--) {
+      years.push({ y: nowYear - yi, total: 0, count: 0 });
     }
-    var mIdx = {};
-    months.forEach(function (m, i) { mIdx[m.key] = i; });
-    items.forEach(function (x) {
+    scoped.forEach(function (x) {
       var pd = parseDate(x.it.purchaseDate);
       if (!pd) return;
-      var key = pd.getFullYear() + '-' + pad(pd.getMonth() + 1);
-      if (mIdx[key] != null) months[mIdx[key]].total += x.c.net;
+      var yy = pd.getFullYear();
+      var yQty = (Number(x.it.qty) || 1);
+      for (var yj = 0; yj < years.length; yj++) {
+        if (years[yj].y === yy) { years[yj].total += x.c.net; years[yj].count += yQty; break; }
+      }
     });
-    var mMax = 1, mSum = 0, mTop = months[0];
-    months.forEach(function (m) {
-      if (m.total > mMax) mMax = m.total;
-      if (m.total > mTop.total) mTop = m;
-      mSum += m.total;
+    var yMax = 1, ySum = 0;
+    years.forEach(function (yr) {
+      if (yr.total > yMax) yMax = yr.total;
+      ySum += yr.total;
     });
-    var barsHtml = months.map(function (m, i) {
-      var h = m.total ? Math.max(4, Math.round(m.total / mMax * 100)) : 0;
-      return '<div class="st-bar-col" title="' + m.full + ' · ' + money(m.total) + '">' +
+    var thisYear = years[years.length - 1];
+    var avgYear = Math.round(ySum / years.length * 100) / 100;
+    var barsHtml = years.map(function (yr) {
+      var h = yr.total ? Math.max(4, Math.round(yr.total / yMax * 100)) : 0;
+      return '<div class="st-bar-col" title="' + yr.y + '年 · ' + money(yr.total) + ' · ' + yr.count + ' 件">' +
         '<i style="height:' + h + '%"></i>' +
-        '<span>' + m.label + '</span></div>';
+        '<span>' + yr.count + '件<br>' + String(yr.y).slice(2) + '</span></div>';
     }).join('');
     var monthPanel =
       '<div class="panel st-panel-month">' +
-        '<h3>月度支出</h3><p class="sub">' +
-          (range === 'year' ? '今年每个月的买入金额' : '最近 12 个月的买入金额') +
-          '（已扣二手价值）' + scopeNote + '，横轴为月份</p>' +
+        '<h3>年度投入</h3><p class="sub">' +
+          '每年买入金额与件数（已扣二手价值）' + scopeNote + '，固定显示近 6 个自然年</p>' +
         '<div class="st-bars">' + barsHtml + '</div>' +
-        '<div class="st-bars-foot"><span>最高 ' + cash(mTop.total) + ' · ' + mTop.full + '</span>' +
-          '<span>合计 ' + cash(mSum) + '</span></div>' +
+        '<div class="st-bars-foot"><span>' +
+          (thisYear.total ? '今年 ' + cash(thisYear.total) + ' · ' + thisYear.count + ' 件' : '今年还没买入') +
+        '</span><span>平均每年 <b>' + cash(avgYear) + '</b></span></div>' +
       '</div>';
 
     $('#stats-body').innerHTML =
@@ -3117,11 +3171,13 @@
       '</div>' +
       monthPanel +
       '<div class="panel">' +
-        '<h3>分类占比</h3><p class="sub">按金额（已扣二手价值）' + scopeNote + '</p>' +
+        '<h3>' + (scope === 'outdoor' ? '装备分类占比' : '分类占比') + '</h3><p class="sub">按金额（已扣二手价值）' +
+        (scope === 'outdoor' ? ' · 按装备分类' : '') + scopeNote + '</p>' +
         '<div class="st-donut-row">' + donutHtml + '<ul class="st-legend">' + legendHtml + '</ul></div>' +
       '</div>' +
       '<div class="panel">' +
-        '<h3>分类明细</h3><p class="sub">金额、件数一眼对比' + scopeNote + '</p>' +
+        '<h3>' + (scope === 'outdoor' ? '装备分类明细' : '分类明细') + '</h3><p class="sub">金额、件数一眼对比' +
+        (scope === 'outdoor' ? ' · 按装备分类' : '') + scopeNote + '</p>' +
         '<div class="st-cat-grid">' + catGridHtml + '</div>' +
       '</div>' +
       '<div class="panel st-panel-vs">' +
@@ -6254,9 +6310,23 @@
     if (el.closest('#gphoto-camera')) { pickPhoto('gear', true); return; }
     if (el.closest('#gphoto-remove')) { state.gearFormPhoto = null; renderFormPhoto('gear'); return; }
 
-    // 搜索：常驻搜索条，🔍 只负责聚焦
+    // 搜索：手机上点 🔍 才展开搜索条，再点收起并清空；平板/电脑保持常驻，🔍 只聚焦
     if (el.closest('#btn-search')) {
-      $('#q').focus();
+      if (window.matchMedia('(max-width:699px)').matches) {
+        var bar = $('#asset-search');
+        var opening = bar.classList.contains('hidden');
+        bar.classList.toggle('hidden', !opening);
+        if (opening) {
+          $('#q').focus();
+        } else if ((state.q || '').trim()) {
+          $('#q').value = '';
+          state.q = '';
+          syncQClear();
+          renderAssets();
+        }
+      } else {
+        $('#q').focus();
+      }
       return;
     }
     if (el.closest('#btn-q-clear')) {
@@ -6384,6 +6454,7 @@
     this.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
   });
   $('#editor-useMode').addEventListener('change', function () {
+    state.useModeTouched = true;
     if (this.value === 'daily') {
       var fromEl = $('#editor-dailyFrom');
       if (fromEl && !fromEl.value) fromEl.value = $('#editor-form').elements.purchaseDate.value || todayStr();
@@ -6524,6 +6595,18 @@
   }).join('');
   $('#editor-cat').addEventListener('change', function () {
     syncGearCatRow(this.value, true);
+    autoFillGearCat();
+    /* 新增物品时切换分类，使用计数默认值跟着分类走；手动选过就不动 */
+    if (!state.editingId && !state.useModeTouched) {
+      var catForm = $('#editor-form');
+      var mode = defaultUseMode({ cat: this.value });
+      catForm.elements.useMode.value = mode;
+      if (mode === 'daily') {
+        var fromEl = $('#editor-dailyFrom');
+        if (fromEl && !fromEl.value) fromEl.value = catForm.elements.purchaseDate.value || todayStr();
+      }
+      syncDailyRows();
+    }
   });
 
   $('#geditor-cat').innerHTML = GEAR_CATS.map(function (c) {
@@ -6620,6 +6703,11 @@
 
   renderAssets();
   syncQClear();
+  // 手机上搜索条默认收起，点顶部 🔍 再展开；平板/电脑保持常驻
+  var assetSearchBar = $('#asset-search');
+  if (assetSearchBar) {
+    assetSearchBar.classList.toggle('hidden', window.matchMedia('(max-width:699px)').matches);
+  }
   renderGear();
   renderTrips();
   renderStats();

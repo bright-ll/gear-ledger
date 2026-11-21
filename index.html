@@ -69,7 +69,7 @@
       <div class="hero-outdoor hidden" id="hero-outdoor"></div>
     </div>
 
-    <div class="asset-search">
+    <div class="asset-search" id="asset-search">
       <div class="searchbar">
         <span>🔍</span>
         <input id="q" type="search" placeholder="搜索名称、备注、分类" autocomplete="off">
@@ -79,7 +79,7 @@
 
     <div class="asset-tools">
       <div class="chips scroll-x" id="cat-chips"></div>
-      <button class="filter-btn sort-btn" id="btn-asort" aria-pressed="false" title="拖动调整物品顺序">调整顺序</button>
+      <button class="filter-btn sort-btn" id="btn-asort" aria-pressed="false" title="拖动调整物品顺序">排序</button>
       <button class="filter-btn" id="btn-afilter">筛选<span class="filter-count" id="afilter-count"></span></button>
     </div>
     <div class="sort-hint hidden" id="asset-sort-hint">按住 ⠿ 拖动调整顺序，改完点右上角「完成」</div>
@@ -148,7 +148,7 @@
     </header>
     <div class="gear-tools">
       <div class="chips scroll-x" id="gear-chips"></div>
-      <button class="filter-btn sort-btn" id="btn-gsort" aria-pressed="false" title="拖动调整装备顺序">调整顺序</button>
+      <button class="filter-btn sort-btn" id="btn-gsort" aria-pressed="false" title="拖动调整装备顺序">排序</button>
       <button class="filter-btn" id="btn-gfilter">筛选<span class="filter-count" id="gfilter-count"></span></button>
     </div>
     <div class="sort-hint hidden" id="gear-sort-hint">按住 ⠿ 拖动调整顺序，改完点右上角「完成」</div>
@@ -427,6 +427,11 @@
         <label class="row"><span>购买时间</span><input type="date" name="purchaseDate" required></label>
         <label class="row"><span>价格</span><input type="number" name="price" step="0.01" min="0" placeholder="填写实际到手价" inputmode="decimal"></label>
         <label class="row"><span>数量</span><input type="number" name="qty" step="1" min="1" value="1" inputmode="numeric"></label>
+        <div class="row" id="icon-row">
+          <span>物品图标</span>
+          <button type="button" class="icon-preview" id="icon-preview">📦 <small>选择</small></button>
+        </div>
+        <div class="icon-picker hidden" id="icon-picker"></div>
         <label class="row"><span>分类</span>
           <select name="cat" id="editor-cat"></select>
         </label>
@@ -453,12 +458,6 @@
 
       <div class="editor-more hidden" id="editor-more">
         <div class="form-card">
-          <div class="row" id="icon-row">
-            <span>物品图标</span>
-            <button type="button" class="icon-preview" id="icon-preview">📦 <small>选择</small></button>
-          </div>
-          <div class="icon-picker hidden" id="icon-picker"></div>
-
           <label class="row col"><span>标签</span>
             <input name="tags" placeholder="用逗号隔开，例如：GORE-TEX, 防水, 轻量">
           </label>

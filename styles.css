@@ -15,6 +15,7 @@
   --blue2:#5a6cff;
   --blue-soft:#eef0ff;
   --red:#f04438;
+  --red-soft:#fff1f0;
   --ch1:#4354f0;--ch2:#0ea5b7;--ch3:#0e9f6e;--ch4:#f4703a;--ch5:#8b5cf6;--ch6:#db2777;--ch7:#8a90a0;
   --st-bar:linear-gradient(90deg,#7c8bff,#4354f0);
   --st-bar-warn:linear-gradient(90deg,#ffb27a,#f4703a);
@@ -40,6 +41,7 @@
   --blue2:#7d8cff;
   --blue-soft:#232840;
   --red:#ff6b5e;
+  --red-soft:#2b1f21;
   --ch1:#7d8cff;--ch2:#38bdf8;--ch3:#4ade80;--ch4:#ffb27a;--ch5:#b39dff;--ch6:#f472b6;--ch7:#94a3b8;
   --st-bar:linear-gradient(90deg,#8f9cff,#5b6cf5);
   --st-bar-warn:linear-gradient(90deg,#ffc08f,#f4703a);
@@ -1055,6 +1057,18 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   }
   .fab-add:active{transform:scale(.93)}
   [data-theme="dark"] .fab-add{box-shadow:0 6px 16px rgba(20,28,120,.5)}
+
+  /* 资产页搜索条：手机上收窄一点，点 🔍 展开时轻快滑出 */
+  #view-assets .asset-search .searchbar{padding:8px 12px;border-radius:12px;font-size:13.5px}
+  #view-assets .asset-search:not(.hidden){animation:qIn .16s ease}
+  @keyframes qIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+  /* 手机端：分类 chips 与筛选/排序按钮收小一档 */
+  .chips{gap:7px}
+  [data-theme] .chips .chip{padding:5px 11px;font-size:12.5px}
+  [data-theme] .asset-tools .chips .chip,
+  [data-theme] .gear-tools .chips .chip{padding:4px 10px;font-size:12.5px}
+  .filter-btn{padding:4px 9px;font-size:12px}
 }
 
 /* =========================================================
@@ -1354,6 +1368,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   --blue2:#d45c2a;
   --blue-soft:#f7e5d6;
   --red:#b3261e;
+  --red-soft:#f9e2d9;
   --ch1:#4a6b4f;--ch2:#3c6e8f;--ch3:#6d7f3f;--ch4:#c2521f;--ch5:#7d5a8c;--ch6:#a4576c;--ch7:#8d7f6a;
   --st-bar:linear-gradient(90deg,#e0a883,#b8491d);
   --st-bar-warn:linear-gradient(90deg,#e3b184,#c07843);
@@ -1377,6 +1392,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-l
   --blue2:#eda06e;
   --blue-soft:#33261b;
   --red:#e0685c;
+  --red-soft:#331f1b;
 }
 
 /* ---------- 页头 ---------- */
@@ -2170,3 +2186,16 @@ body.sort-dragging .aitem,
 body.sort-dragging .card,
 body.sort-dragging .g-list,
 body.sort-dragging .g-text{transition:none}
+
+/* ================= 资产状态整行显示 =================
+   已退役置灰淡化 / 已超期淡红 / 预备役淡蓝（三种视图一致） */
+.asset.st-retired,.acard.st-retired,.aitem.st-retired{opacity:.5}
+.asset.st-retired .a-name,.acard.st-retired .acard-name,.aitem.st-retired .at-name{color:var(--sub)}
+.asset.st-overdue,.aitem.st-overdue{background:linear-gradient(90deg,var(--red-soft),var(--card) 62%)}
+.acard.st-overdue{border:1px solid var(--red)}
+.asset.st-reserve,.aitem.st-reserve{background:linear-gradient(90deg,var(--blue-soft),var(--card) 62%)}
+.acard.st-reserve{border:1px solid var(--blue)}
+
+/* 年度投入：柱下两行标签（件数 + 年份），预留更高底部空间 */
+.st-panel-month .st-bars{margin-bottom:34px}
+.st-panel-month .st-bar-col span{line-height:1.5}
