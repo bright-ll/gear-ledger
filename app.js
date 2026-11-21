@@ -2860,7 +2860,8 @@
 
   function renderStats() {
     var scope = state.statsScope === 'all' ? 'all' : 'outdoor';
-    var all = DB.items.filter(function (x) { return !x.deleted; })
+    /* 示例数据不参与任何分析统计，避免污染真实账目 */
+    var all = DB.items.filter(function (x) { return !x.deleted && !x.demo; })
       .map(function (it) { return { it: it, c: calc(it) }; });
     var scoped = scope === 'outdoor'
       ? all.filter(function (x) { return isOutdoorItem(x.it); })
@@ -3023,19 +3024,36 @@
         cash(r.amount) + ' · ' + ptxt + '</span></div></li>';
     }).join('');
 
-    var catGridHtml = catRows.map(function (r) {
-      var pct = total ? r.amount / total * 100 : 0;
-      var ptxt;
-      if (pct >= 10) ptxt = Math.round(pct) + '%';
-      else if (pct >= 0.1) ptxt = (Math.round(pct * 10) / 10) + '%';
-      else if (pct > 0) ptxt = '<0.1%';
-      else ptxt = '0%';
-      return '<div class="st-cat cc' + r.ci + '">' +
-        '<div class="st-cat-pct">' + ptxt + '</div>' +
-        '<b>' + esc(r.name) + '</b>' +
-        '<span>' + r.qty + ' 件 · ' + cash(r.amount) + '</span>' +
+    /* 投入价格段：按单件到手价分档，看钱花在什么价位（替换与占比重复的分类明细） */
+    var TIERS = [
+      { min: 1000, label: '≥1000' },
+      { min: 500, label: '500–999' },
+      { min: 100, label: '100–499' },
+      { min: 0, label: '<100' }
+    ];
+    var tierAgg = TIERS.map(function () { return { amount: 0, qty: 0 }; });
+    items.forEach(function (x) {
+      var qty = Number(x.it.qty) || 1;
+      var unit = qty ? x.c.net / qty : 0;
+      for (var ti = 0; ti < TIERS.length; ti++) {
+        if (unit >= TIERS[ti].min) { tierAgg[ti].amount += x.c.net; tierAgg[ti].qty += qty; break; }
+      }
+    });
+    var tierMax = 1;
+    tierAgg.forEach(function (t) { if (t.amount > tierMax) tierMax = t.amount; });
+    var tierHtml = TIERS.map(function (t, ti) {
+      var a = tierAgg[ti];
+      var raw = total ? a.amount / total * 100 : 0;
+      var pctTxt = raw >= 10 ? Math.round(raw) + '%' : (raw > 0 ? (Math.round(raw * 10) / 10) + '%' : '0%');
+      var w = a.amount ? Math.max(2, Math.round(a.amount / tierMax * 100)) : 0;
+      return '<div class="st-tier">' +
+        '<div class="st-tier-top"><b>' + t.label + '</b><span>' + a.qty + ' 件 · ' + cash(a.amount) + ' · ' + pctTxt + '</span></div>' +
+        '<div class="st-tier-bar"><i style="width:' + w + '%"></i></div>' +
       '</div>';
     }).join('');
+    var bigQty = tierAgg[0].qty + tierAgg[1].qty;
+    var bigAmt = tierAgg[0].amount + tierAgg[1].amount;
+    var bigPct = total ? Math.round(bigAmt / total * 100) : 0;
 
     var pu = perUse.slice().sort(function (a, b) { return a.c.perUse - b.c.perUse; });
     var vsHtml;
@@ -3176,9 +3194,10 @@
         '<div class="st-donut-row">' + donutHtml + '<ul class="st-legend">' + legendHtml + '</ul></div>' +
       '</div>' +
       '<div class="panel">' +
-        '<h3>' + (scope === 'outdoor' ? '装备分类明细' : '分类明细') + '</h3><p class="sub">金额、件数一眼对比' +
-        (scope === 'outdoor' ? ' · 按装备分类' : '') + scopeNote + '</p>' +
-        '<div class="st-cat-grid">' + catGridHtml + '</div>' +
+        '<h3>投入价格段</h3><p class="sub">按单件到手价分档（已扣二手价值）' + scopeNote + '</p>' +
+        tierHtml +
+        '<div class="st-bars-foot" style="margin-top:14px"><span>大件（≥500）' + bigQty + ' 件</span>' +
+          '<span>金额占 <b>' + bigPct + '%</b></span></div>' +
       '</div>' +
       '<div class="panel st-panel-vs">' +
         '<h3>单次成本排行</h3><p class="sub">按累计使用次数摊薄 · 越少越划算' + scopeNote + '</p>' +

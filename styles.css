@@ -2199,3 +2199,12 @@ body.sort-dragging .g-text{transition:none}
 /* 年度投入：柱下两行标签（件数 + 年份），预留更高底部空间 */
 .st-panel-month .st-bars{margin-bottom:34px}
 .st-panel-month .st-bar-col span{line-height:1.5}
+
+/* 投入价格段：横向分档条 */
+.st-tier{margin-top:13px}
+.st-tier:first-of-type{margin-top:6px}
+.st-tier-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px}
+.st-tier-top b{font-size:13.5px;font-variant-numeric:tabular-nums}
+.st-tier-top span{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+.st-tier-bar{height:10px;border-radius:5px;background:var(--line2);overflow:hidden}
+.st-tier-bar i{display:block;height:100%;border-radius:5px;background:var(--st-bar)}
